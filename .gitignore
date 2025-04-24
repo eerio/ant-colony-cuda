@@ -1,1 +1,5 @@
 build
+*.o
+balawender.zip
+acotsp
+out.txt
