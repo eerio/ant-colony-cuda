@@ -1,27 +1,40 @@
-NVCC = nvcc
-NVCCFLAGS = -O3 -arch=sm_75  # For Titan V (compute capability 7.5)
-INCLUDES = -Iinclude
+NVCC = /usr/local/cuda/bin/nvcc
+# NVCCFLAGS = -O3 -arch=sm_75  # For Titan V (compute capability 7.5)
+NVCCFLAGS = -O3 # For Titan V (compute capability 7.5)
 
-SRC_DIR = src
-OBJ_DIR = obj
-BIN_DIR = bin
+all: acotsp
 
-SRCS = $(wildcard $(SRC_DIR)/*.cu)
-OBJS = $(patsubst $(SRC_DIR)/%.cu,$(OBJ_DIR)/%.o,$(SRCS))
-EXEC = acotsp
+%.o: %.cu
+	TMPDIR=build srun --partition=common --time 10 --gres=gpu:1 -- $(NVCC) $(NVCCFLAGS) -c $< -o $@
 
-all: directories $(BIN_DIR)/$(EXEC)
-
-directories:
-	mkdir -p $(OBJ_DIR) $(BIN_DIR)
-
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.cu
-	$(NVCC) $(NVCCFLAGS) $(INCLUDES) -c $< -o $@
-
-$(BIN_DIR)/$(EXEC): $(OBJS)
-	$(NVCC) $(NVCCFLAGS) $^ -o $@
+acotsp: main.o
+	TMPDIR=build srun --partition=common --time 10 --gres=gpu:1 -- $(NVCC) $(NVCCFLAGS) $^ -o $@
 
 clean:
-	rm -rf $(OBJ_DIR) $(BIN_DIR)
+	rm -rf *.o test balawender.zip acotsp out.txt
 
-.PHONY: all directories clean
+balawender.zip: *.cu Makefile
+	rm -f balawender.zip
+	mkdir -p balawender
+	cp *.cu Makefile balawender/
+	zip -r balawender.zip balawender
+	rm -r balawender
+
+pack: balawender.zip
+	@echo "Packaged balawender.zip with source files and Makefile."
+
+test: pack
+	mkdir -p test
+	cp balawender.zip test/
+	cd test && \
+		unzip balawender.zip && \
+		cd balawender && \
+		cp ../../tsplib/a280.tsp . && \
+		make clean && \
+		make && \
+		srun --partition=common --time 10 --gres=gpu:1 -- ./acotsp a280.tsp out.txt WORKER 1 1 2 0.5 42; \
+		cd ../.. && \
+		rm -rf test
+
+
+.PHONY: all clean pack test
