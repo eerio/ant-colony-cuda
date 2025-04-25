@@ -34,7 +34,7 @@ test/balawender/acotsp: balawender.zip
 	cp -r ../../tsplib/ . && \
 	make clean && \
 	make && \
-	srun --partition=common --time 10 --gres=gpu:1 -- ./acotsp tsplib/a280.tsp out.txt BASELINE 1 1 2 0.5 42; \
+	srun --partition=common --time 10 --gres=gpu:1 -- ./acotsp tsplib/a280.tsp out.txt BASELINE 10 1 2 0.5 42; \
 	head -n 1 out.txt; \
 	cat tsplib/solutions | grep a280 ; \
 

@@ -4,6 +4,13 @@
 #include <assert.h>
 #include "tsp.h"
 
+__global__ void initialize_rand_states(curandState* rand_states, int num_ants, unsigned long seed) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < num_ants) {
+        curand_init(seed, idx, 0, &rand_states[idx]);
+    }
+}
+
 __global__ void computeChoiceInfoKernel(
     float* d_choice_info,
     const float* d_pheromone,
@@ -166,18 +173,38 @@ __global__ void computeTourLengthsKernel(
 
     if (ant_idx < num_ants) {
         const int* tour = &d_ant_tours[ant_idx * num_cities];
-        float length = 0.0f;
+        double length = 0.0f;
 
         for (int i = 0; i < num_cities - 1; ++i) {
             int from = tour[i];
             int to = tour[i + 1];
+            // Check for valid indices
+            if (from < 0 || from >= num_cities || to < 0 || to >= num_cities) {
+                printf("Error: Invalid city index in tour! ant_idx=%d, i=%d, from=%d, to=%d\n", ant_idx, i, from, to);
+                return; // Exit the kernel if an error is detected
+            }
             length += d_distances[from * num_cities + to];
+            if (length < 0) {
+                printf("Error: Negative length encountered! ant_idx=%d, i=%d, length=%f\n", ant_idx, i, length);
+                return; // Exit the kernel if an error is detected
+            }
+            if (length > 1e6) {
+                printf("Warning: Length too large! ant_idx=%d, i=%d, length=%f\n", ant_idx, i, length);
+            }
         }
 
         // Add distance from last to first to complete the tour
         length += d_distances[tour[num_cities - 1] * num_cities + tour[0]];
+        if (length < 0) {
+            printf("Error: Negative length encountered! ant_idx=%d, i=last, length=%f\n", ant_idx, length);
+            length = 42.42;
+        }
+        if (length > 1e6) {
+            printf("Warning: Length too large! ant_idx=%d, i=last, length=%f\n", ant_idx, length);
+            length = 42.42;
+        }
 
-        d_tour_lengths[ant_idx] = length;
+        d_tour_lengths[ant_idx] = (float)length;
     }
 }
 
@@ -193,7 +220,7 @@ TspResult solveTSPWorker(
 ) {
     int num_cities = tsp_input.dimension;
     size_t matrix_size = sizeof(float) * num_cities * num_cities;
-    int num_ants = 10;
+    int num_ants = 8;
 
     // Allocate memory for ant tours and visited matrix
     int* d_ant_tours;
@@ -201,14 +228,14 @@ TspResult solveTSPWorker(
     curandState* d_rand_states;
 
     cudaMalloc(&d_ant_tours, sizeof(int) * num_ants * num_cities);
-    cudaMalloc(&d_ant_visited, sizeof(int) * num_ants * num_cities);
+    cudaMalloc(&d_ant_visited, sizeof(bool) * num_ants * num_cities);
     float* d_tour_lengths;
     cudaMalloc(&d_tour_lengths, sizeof(float) * num_ants);
 
     cudaMalloc(&d_rand_states, sizeof(curandState) * num_ants);
 
     // Initialize visited array to 0
-    cudaMemset(d_ant_visited, 0, sizeof(int) * num_ants * num_cities);
+    cudaMemset(d_ant_visited, 0, sizeof(bool) * num_ants * num_cities);
 
     // Allocate memory
     float *d_choice_info, *d_pheromone, *d_distances;
@@ -234,18 +261,18 @@ TspResult solveTSPWorker(
 
     // Loop
     int threads_per_block = 256;
-    // int threads_per_block = 4;
-    int total = num_cities * num_cities;
-    int blocks = (total + threads_per_block - 1) / threads_per_block;
-    // int blocks = 3;
+    int num_blocks = (num_ants + threads_per_block - 1) / threads_per_block;
+
+    initialize_rand_states<<<num_blocks, threads_per_block>>>(d_rand_states, num_ants, seed);
+    cudaDeviceSynchronize();
 
     for (unsigned int iter = 0; iter < num_iter; ++iter) {
-        computeChoiceInfoKernel<<<blocks, threads_per_block>>>(
+        computeChoiceInfoKernel<<<num_blocks, threads_per_block>>>(
             d_choice_info, d_pheromone, d_distances, num_cities, alpha, beta
         );
         cudaDeviceSynchronize();
 
-        tourConstructionKernel<<<blocks, threads_per_block>>>(
+        tourConstructionKernel<<<num_blocks, threads_per_block>>>(
             d_ant_tours,
             d_ant_visited,
             d_choice_info,
@@ -254,14 +281,14 @@ TspResult solveTSPWorker(
             d_rand_states
         );
         cudaDeviceSynchronize();
-        evaporatePheromoneKernel<<<blocks, threads_per_block>>>(d_pheromone, evaporate, num_cities);
+        evaporatePheromoneKernel<<<num_blocks, threads_per_block>>>(d_pheromone, evaporate, num_cities);
         cudaDeviceSynchronize();
-        computeTourLengthsKernel<<<blocks, threads_per_block>>>(
+        computeTourLengthsKernel<<<num_blocks, threads_per_block>>>(
             d_ant_tours, d_distances, d_tour_lengths, num_ants, num_cities
         );
         cudaDeviceSynchronize();
-        float Q = 100.0f;  // You can tune this
-        depositPheromoneKernel<<<blocks, threads_per_block>>>(
+        float Q = 1.0f;  // You can tune this
+        depositPheromoneKernel<<<num_blocks, threads_per_block>>>(
             d_pheromone, d_ant_tours, d_tour_lengths, num_ants, num_cities, Q
         );
         cudaDeviceSynchronize();
@@ -269,10 +296,12 @@ TspResult solveTSPWorker(
 
     // Return dummy result
     // Find best tour
-    float best_tour_length = 1e10f;
+    float best_tour_length = 1e7f;
     int best_ant_index = -1;
     float* h_tour_lengths = new float[num_ants];
+    cudaDeviceSynchronize();
     cudaMemcpy(h_tour_lengths, d_tour_lengths, sizeof(float) * num_ants, cudaMemcpyDeviceToHost);
+    cudaDeviceSynchronize();
 
     for (int i = 0; i < num_ants; ++i) {
         if (h_tour_lengths[i] < best_tour_length) {
@@ -281,6 +310,10 @@ TspResult solveTSPWorker(
         }
     }
     delete[] h_tour_lengths;
+    if (best_ant_index == -1) {
+        printf("Error: No valid ant found!\n");
+        return {};
+    }
 
     // Copy best tour to host
     unsigned int* h_best_tour = new unsigned int[num_cities];
@@ -291,6 +324,13 @@ TspResult solveTSPWorker(
     result.dimension = num_cities;
     result.cost = best_tour_length;
     result.tour = h_best_tour;
+
+    if (result.cost < 0) {
+        printf("Error: Negative length encountered! ant_idx=last, i=last, length=%f\n", result.cost);
+    }
+    if (result.cost > 1e6) {
+        printf("Warning: Length too large! ant_idx=last, i=last, length=%f\n",  result.cost);
+    }
 
     // Free GPU memory
     cudaFree(d_choice_info);
