@@ -4,8 +4,13 @@
 #include <sstream>
 #include <optional>
 #include <curand_kernel.h>
+#include "tsp.h"
+#include "baseline.h"
+#include "worker.h"
+#include "queen.h"
 
 enum Implementation {
+    BASELINE,
     WORKER,
     QUEEN
 };
@@ -146,11 +151,6 @@ std::optional<ProblemData> readProblemData(const std::string &filename) {
     return data;
 }
 
-struct TspInput {
-    unsigned int dimension;
-    float *distances;
-};
-
 TspInput convertToTspInput(const ProblemData &problem_data) {
     TspInput tsp_input;
     tsp_input.dimension = problem_data.dimension;
@@ -169,34 +169,6 @@ TspInput convertToTspInput(const ProblemData &problem_data) {
     }
     return tsp_input;
 }
-
-struct TspResult {
-    unsigned int dimension;
-    float cost;
-    unsigned int *tour;
-};
-
-float dist(const TspInput &tsp_input, unsigned int i, unsigned int j) {
-    return tsp_input.distances[i * tsp_input.dimension + j];
-}
-
-TspResult solveTSP(const TspInput &tsp_input, unsigned int num_iter, float alpha, float beta, float evaporate) {
-    TspResult result;
-    result.dimension = tsp_input.dimension;
-    result.cost = 0.0f;
-    result.tour = new unsigned int[result.dimension];
-
-    // baseline
-    result.tour[0] = 0;
-    for (unsigned int i = 1; i < result.dimension; ++i) {
-        result.tour[i] = i;
-        result.cost += dist(tsp_input, i - 1, i);
-    }
-    result.cost += dist(tsp_input, result.dimension - 1, 0); // return to start
-
-    return result;
-}
-
 
 int main(int argc, char *argv[]) {
     // Expected arguments:
@@ -238,6 +210,8 @@ int main(int argc, char *argv[]) {
         impl = WORKER;
     } else if (type_str == "QUEEN") {
         impl = QUEEN;
+    } else if (type_str == "BASELINE") {
+        impl = BASELINE;
     } else {
         std::cerr << "Invalid TYPE. Must be WORKER or QUEEN." << std::endl;
         return 1;
@@ -299,7 +273,14 @@ int main(int argc, char *argv[]) {
     // }
 
     // Solve TSP
-    TspResult result = solveTSP(tsp_input, num_iter, alpha, beta, evaporate);
+    TspResult result;
+    if (impl == BASELINE) {
+        result = solveTSPBaseline(tsp_input, num_iter, alpha, beta, evaporate, seed);
+    } else if (impl == WORKER) {
+        result = solveTSPWorker(tsp_input, num_iter, alpha, beta, evaporate, seed);
+    } else if (impl == QUEEN) {
+        result = solveTSPQueen(tsp_input, num_iter, alpha, beta, evaporate, seed);
+    }
     if (result.dimension == 0) {
         std::cerr << "Error: TSP solver failed: dimension == 0" << std::endl;
         delete[] tsp_input.distances;
