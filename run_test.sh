@@ -5,9 +5,9 @@ if [ $# -eq 0 ]; then
 fi
 
 # extract basename from the first argument
-filename=$(basename -- "$1")
+filename=$(basename -- "$1" ".${1##*.}")
 
-make; \
+make && \
 srun --partition=common --time 10 --gres=gpu:1 -- ./acotsp "$1" out.txt WORKER 1 1 2 0.5 42 && \
 head -n 1 out.txt && \
 cat tsplib/solutions | grep "$filename" && \
