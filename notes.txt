@@ -1,0 +1,114 @@
+$ srun --partition=common --time 10 --gres=gpu:1 -- nvidia-smi
+Fri Apr 25 14:06:34 2025       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 565.57.01              Driver Version: 565.57.01      CUDA Version: 12.7     |
+|-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA TITAN V                 On  |   00000000:03:00.0 Off |                  N/A |
+| 31%   45C    P0             38W /  250W |       1MiB /  12288MiB |      0%      Default |
+|                                         |                        |                  N/A |
++-----------------------------------------+------------------------+----------------------+
+
+
+$ srun --partition=common --time 10 --gres=gpu:1 -- nvidia-smi --query-gpu=compute_cap --format=csv
+compute_cap
+7.0
+
+https://docs.nvidia.com/cuda/volta-tuning-guide/index.html
+https://images.nvidia.com/content/volta-architecture/pdf/volta-architecture-whitepaper.pdf
+
+Architecture: Volta (CC 7.0)
+unified data cache size: 128 KB
+shared mem capacity can be set to 0, 8, 16, 32, 64, 96 KB
+Volta, max no of concurrent warps per SM: 64
+register file size is 64k 32-bit registers per SM
+max registers per thread is 255
+max no of thread blocks per SM is 32
+shared mem cap per sm is 96KB
+tensor core operations A x B + C for A, B: 4x4 matrices as FP16
+
+memory:
+up to 8 memory dies per HBM2 stack, 4 stacks, max 32 
+
+Tesla V100
+6 GPCs, GPU Processing Clusters
+each GPC have:
+- 7 TPCs, Texture Processing Clusters
+- 14 SMs, Streaming Multiprocessors
+84 Volta SMs
+each SM have:
+- 64 FP32 cores
+- 64 INT32 cores
+- 32 FP64 cores
+- 8 Tensor cores
+- 4 Texture units
+8 512-bit memory controllers
+
+threads per warp: 32
+warps per sm: 64
+threads per sm: 2048
+blocks per sm: 32
+32b regs per sm: 65536
+regs per block: 65536
+regs per thread: 255
+threads per block: 1024
+fp32 cores per sm: 64
+shmem size per sm: up to 96KB
+
+page 18: physical layout
+
+
+$ scontrol show nodes | grep Gres
+   Gres=gpu:a100:8
+   Gres=gpu:titanv:8
+   Gres=gpu:rtx2080ti:6
+   Gres=gpu:titanv:2,gpu:titanx:6
+   Gres=gpu:rtx2080ti:2,gpu:titanx:6
+   Gres=gpu:rtx2080ti:2,gpu:titanx:6
+   Gres=gpu:rtx2080ti:8
+   Gres=gpu:a6000:2
+   Gres=gpu:h100:8
+   Gres=gpu:titanv:4
+   Gres=gpu:titanv:4
+
+$ srun --partition=common --time 10 --gres=gpu:rtx2080ti -- nvidia-smi -q | grep Architecture
+    Product Architecture                  : Turing
+
+$ srun --partition=common --time 10 --gres=gpu:rtx2080ti --  lspci | grep -i vga
+03:00.0 VGA compatible controller: NVIDIA Corporation TU102 [GeForce RTX 2080 Ti] (rev a1)
+
+Informacje z techup stronki costam
+RTX 2080 Ti = TU102 (TU102-300A-K1-A1)
+Titan V = GV100 (GV100-400-A1)
+Titan X = GP102 /// nie!GM200 (GM200-400-A1)???? nie! gp102
+
+Cards available:
+GeForce RTX 2080 Ti: 7.5 (Turing); chip TU102
+- Tuning guide: https://docs.nvidia.com/cuda/pdf/Turing_Tuning_Guide.pdf
+- TU102 whitepaper: https://images.nvidia.com/aem-dam/en-zz/Solutions/design-visualization/technologies/turing-architecture/NVIDIA-Turing-Architecture-Whitepaper.pdf
+
+NVIDIA TITAN V: 7.0 (Volta); chip GV100
+- Tuning guide: https://docs.nvidia.com/cuda/archive/12.6.2/pdf/Volta_Tuning_Guide.pdf
+- GV100 whitepaper: https://images.nvidia.com/content/volta-architecture/pdf/volta-architecture-whitepaper.pdf
+
+NVIDIA TITAN X: 6.1 (Pascal); chip GP102
+- Tuning guide: https://docs.nvidia.com/cuda/pdf/Pascal_Tuning_Guide.pdf
+- GP100 whitepaper: https://images.nvidia.com/content/pdf/tesla/whitepaper/pascal-architecture-whitepaper.pdf 
+
+Porównanie:
+RTX ma memory bandwidth 616GB/s
+Titan X: 480 GB/s
+Titan V: 653 GB/s
+
+Wybieram Titan V, bo różnica z RTX jest niewielka, a mamy 2x więcej dostępnych jednostek
+RTX 2080 Ti:
+- arch: Turing
+- GPCs: 6
+- TPCs: 34
+- SMs: 68
+- cores / SM: 64
+- tensor cores / SM: 8
+- RT cores: 68

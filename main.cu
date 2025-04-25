@@ -262,6 +262,17 @@ int main(int argc, char *argv[]) {
     ProblemData problem_data = problem_data_opt.value();
 
     TspInput tsp_input = convertToTspInput(problem_data);
+    if (tsp_input.dimension == 0) {
+        std::cerr << "Error: Unable to convert problem data to TSP input." << std::endl;
+        delete[] problem_data.points;
+        return 1;
+    }
+    if (tsp_input.dimension > 1024) {
+        std::cerr << "Error: Problem dimension exceeds maximum limit of 1024." << std::endl;
+        delete[] problem_data.points;
+        delete[] tsp_input.distances;
+        return 1;
+    }
 
     // Print problem data
     // std::cout << "Problem dimension: " << problem_data.dimension << std::endl;

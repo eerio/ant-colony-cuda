@@ -3,3 +3,4 @@ build
 balawender.zip
 acotsp
 out.txt
+.venv/*
