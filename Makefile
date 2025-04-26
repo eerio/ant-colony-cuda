@@ -1,5 +1,5 @@
 NVCC = /usr/local/cuda/bin/nvcc
-NVCCFLAGS = -O3 -Iinclude -arch=sm_70 -DDEBUG # For Titan V (compute capability 7.0)
+NVCCFLAGS = -O3 -Iinclude -DDEBUG # For Titan V (compute capability 7.0)
 
 TSP_FILES=$(wildcard tests/*.tsp)
 GEO_TSP_FILES=$(wildcard tests/geo-*.tsp)
@@ -8,11 +8,11 @@ all: acotsp
 
 %.o: %.cu
 	# TMPDIR=build srun --partition=common --time 10 --gres=gpu:titanv -- $(NVCC) $(NVCCFLAGS) -c $< -o $@
-	TMPDIR=build srun --partition=common --time 10 --gres=gpu -- $(NVCC) $(NVCCFLAGS) -c $< -o $@
+	TMPDIR=build srun --partition=common --time 10 --gres=gpu:rtx2080ti -- $(NVCC) $(NVCCFLAGS) -c $< -o $@
 
 acotsp: main.o worker.o queen.o baseline.o
 	# TMPDIR=build srun --partition=common --time 10 --gres=gpu:titanv -- $(NVCC) $(NVCCFLAGS) $^ -o $@
-	TMPDIR=build srun --partition=common --time 10 --gres=gpu -- $(NVCC) $(NVCCFLAGS) $^ -o $@
+	TMPDIR=build srun --partition=common --time 10 --gres=gpu:rtx2080ti -- $(NVCC) $(NVCCFLAGS) $^ -o $@
 
 clean:
 	rm -rf *.o test balawender.zip acotsp out.txt
@@ -43,17 +43,21 @@ test/balawender/acotsp: balawender.zip
 
 test: test/balawender/acotsp
 
-run_ortools_parallel: $(TSP_FILES:.tsp=_ortools.out)
-tests/%_ortools.out: tests/%.tsp
-	. .venv/bin/activate && python tsp_ortools.py $< > $@
+# run_ortools_parallel: $(TSP_FILES:.tsp=_ortools.out)
+# tests/%_ortools.out: tests/%.tsp
+# 	. .venv/bin/activate && python tsp_ortools.py $< > $@
 
-run_ortools_parallel_geo: $(GEO_TSP_FILES:.tsp=_ortools.out)
-tests/%_ortools.out: tests/%.tsp
-	. .venv/bin/activate && python tsp_ortools.py $< > $@
+# run_ortools_parallel_geo: $(GEO_TSP_FILES:.tsp=_ortools.out)
+# tests/%_ortools.out: tests/%.tsp
+# 	. .venv/bin/activate && python tsp_ortools.py $< > $@
 
-run_baseline_parallel: acotsp $(GEO_TSP_FILES:.tsp=_baseline.out)
+run_baseline_parallel: acotsp $(TSP_FILES:.tsp=_baseline.out)
 tests/%_baseline.out: tests/%.tsp
 	./acotsp $< $@ BASELINE 5 10 2 0.5 42
+
+run_worker_parallel: acotsp $(TSP_FILES:.tsp=_worker.out)
+tests/%_worker.out: tests/%.tsp
+	./acotsp $< $@ WORKER 1 1 2 0.5 42
 
 TSPLIB_SOLUTIONS = tsplib/solutions
 

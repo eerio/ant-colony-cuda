@@ -1,30 +1,11 @@
 Worker kernel działa jakoś tam.
 Trzeba potwierdzić że on jest mniej-więcej zgodny z tym co jest w sekcji baseline papera
 
-Trzeba znaleźć małe test-casy i ręcznie przetestować poszczególne części kodu
-
-Dla średnich testów, mogę na CPU policzyć prawdziwe TSP żeby znaleźć faktyczne rozwiązanie
-
-Trzeba znaleźć dużo testów i przepuścić moje rozwiązanie przez wszystkie żeby się
-upewnić że rozwiązanie jest w miarę bliskie optymalnego
-
 Trzeba zaimplementować Queen version
 
 Trzeba tak wyczyścić kod, żeby te dwie wersje się różniły tylko tam gdzie trzeba
 
 Potem dopiero performance, optimisations i CUDA graph.
-
-Testy z papera:
-- d198
-- a280
-- lin318
-- pcb442
-- rat783
-- pr1002
-
-- pcb1173
-- d1291
-- pr2392
 
 Testy to w sumie cześć raportu:
 - Explanation of both implementations (thread/block layouts and synchronization).
