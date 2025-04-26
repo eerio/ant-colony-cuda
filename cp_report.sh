@@ -1,0 +1,1 @@
+scp entropy:~/ant-colony-cuda/profiler_output.ncu-rep .
