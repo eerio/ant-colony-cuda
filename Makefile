@@ -2,6 +2,7 @@ NVCC = /usr/local/cuda/bin/nvcc
 NVCCFLAGS = -O3 -Iinclude -arch=sm_70 -DDEBUG # For Titan V (compute capability 7.0)
 
 TSP_FILES=$(wildcard tests/*.tsp)
+GEO_TSP_FILES=$(wildcard tests/geo-*.tsp)
 
 all: acotsp
 
@@ -46,8 +47,25 @@ run_ortools_parallel: $(TSP_FILES:.tsp=_ortools.out)
 tests/%_ortools.out: tests/%.tsp
 	. .venv/bin/activate && python tsp_ortools.py $< > $@
 
-run_baseline_parallel: acotsp $(TSP_FILES:.tsp=_baseline.out)
+run_ortools_parallel_geo: $(GEO_TSP_FILES:.tsp=_ortools.out)
+tests/%_ortools.out: tests/%.tsp
+	. .venv/bin/activate && python tsp_ortools.py $< > $@
+
+run_baseline_parallel: acotsp $(GEO_TSP_FILES:.tsp=_baseline.out)
 tests/%_baseline.out: tests/%.tsp
 	./acotsp $< $@ BASELINE 5 10 2 0.5 42
+
+TSPLIB_SOLUTIONS = tsplib/solutions
+
+tests/%_tsplibsolution.out: tests/%.tsp $(TSPLIB_SOLUTIONS)
+	@full="$*"; \
+	name=$$(echo "$$full" | sed 's/^[^\-]*-//'); \
+	solution_line=$$(grep "^$$name :" $(TSPLIB_SOLUTIONS)); \
+	if [ -z "$$solution_line" ]; then \
+		echo "Solution for $$name not found!" >&2; \
+	fi; \
+	cost=$$(echo $$solution_line | awk -F'[: ]+' '{print $$2}'); \
+	echo "$$cost" > $@
+all-tsplib-solutions: $(patsubst tests/%.tsp, tests/%_tsplibsolution.out, $(TSP_FILES))
 
 .PHONY: all clean pack test ortools
