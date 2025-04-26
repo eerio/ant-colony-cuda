@@ -4,11 +4,14 @@ if [ $# -eq 0 ]; then
     exit 1
 fi
 
-# extract basename from the first argument
-filename=$(basename -- "$1" ".${1##*.}")
+# extract basename without extension and directory
+basename=$(basename -- "$1" ".${1##*.}")
+# extract directory path
+dir=$(dirname -- "$1")
+# make output file path
+output_file="${dir}/${basename}_worker.out"
 
 make && \
-srun --partition=common --time 10 --gres=gpu:1 -- ./acotsp "$1" out.txt WORKER 1 1 2 0.5 422 && \
-head -n 1 out.txt && \
-cat tsplib/solutions | grep "$filename" && \
-echo ""
+srun --partition=common --time 10 --gres=gpu:1 -- ./acotsp "$1" "$output_file" WORKER 1 1 2 0.5 422 && \
+head -n 1 "$output_file" && \
+grep "$basename" tsplib/solutions
