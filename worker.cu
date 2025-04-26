@@ -4,11 +4,31 @@
 #include <assert.h>
 #include "tsp.h"
 
+#define PI 3.14159265358979323846
+#define TPB 7
+#define FLT_MAX (3.4e+38F)
+
+__device__ int get_idx(int num_ants) {
+#ifdef DEBUG
+    // our biggest test: pr2392, <= 3 * 1024
+    assert(gridDim.x == 1 + (num_ants - 1) / TPB);
+    assert(gridDim.y == 1);
+    assert(gridDim.z == 1);
+    assert(blockDim.x == TPB);
+    assert(blockDim.y == 1);
+    assert(blockDim.z == 1);
+    assert(threadIdx.x < TPB);
+#else
+    (void)num_ants;
+#endif
+
+    return blockIdx.x * blockDim.x + threadIdx.x;
+}
+
 __global__ void initialize_rand_states(curandState* rand_states, int num_ants, unsigned long seed) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx < num_ants) {
-        curand_init(seed, idx, 0, &rand_states[idx]);
-    }
+    int idx = get_idx(num_ants);
+    if (idx >= num_ants) { return; }
+    curand_init(seed, idx, 0, &rand_states[idx]);
 }
 
 __global__ void computeChoiceInfoKernel(
@@ -17,8 +37,8 @@ __global__ void computeChoiceInfoKernel(
     int num_cities,
     float beta
 ) {
-    int total = num_cities * num_cities;
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int total = num_cities * num_cities;
     int stride = blockDim.x * gridDim.x;
 
     for (int idx = tid; idx < total; idx += stride) {
@@ -44,69 +64,69 @@ __global__ void tourConstructionKernel(
     int num_cities,
     curandState* d_rand_state
 ) {
-    int ant_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int ant_idx = get_idx(num_ants);
     if (ant_idx >= num_ants) return;
+    int i = ant_idx;
 
-    for (int i = ant_idx; i < num_ants; i += blockDim.x * gridDim.x) {
-        int* ant_tour = &d_ant_tours[i * num_cities];
-        bool* ant_visited = &d_ant_visited[i * num_cities];
+    int* ant_tour = &d_ant_tours[i * num_cities];
+    bool* ant_visited = &d_ant_visited[i * num_cities];
 
-        for (int j = 0; j < num_cities; ++j) ant_visited[j] = false;
+    for (int j = 0; j < num_cities; ++j) ant_visited[j] = false;
 
-        int current_city = i % num_cities;
-        ant_tour[0] = current_city;
-        ant_visited[current_city] = true;
+    int current_city = i % num_cities;
+    ant_tour[0] = current_city;
+    ant_visited[current_city] = true;
 
-        curandState local_state = d_rand_state[i];
+    curandState local_state = d_rand_state[i];
 
-        for (int step = 1; step < num_cities; ++step) {
-            float sum_probs = 0.0f;
-            float* selection_probs = &d_selection_probs[i * num_cities];
+    for (int step = 1; step < num_cities; ++step) {
+        float sum_probs = 0.0f;
+        float* selection_probs = &d_selection_probs[i * num_cities];
 
-            for (int j = 0; j < num_cities; ++j) {
-                if (!ant_visited[j]) {
-                    int idx = current_city * num_cities + j;
-                    selection_probs[j] = d_choice_info[idx];
-                    sum_probs += selection_probs[j];
-                } else {
-                    selection_probs[j] = 0.0f;
-                }
+        for (int j = 0; j < num_cities; ++j) {
+            if (!ant_visited[j]) {
+                int idx = current_city * num_cities + j;
+                selection_probs[j] = d_choice_info[idx];
+                sum_probs += selection_probs[j];
+            } else {
+                selection_probs[j] = 0.0f;
             }
-
-            float r = 0.79 * sum_probs;  // Hardcoded 0.79 for now
-            float accumulated_prob = 0.0f;
-            int next_city = -1;
-
-            for (int j = 0; j < num_cities; ++j) {
-                if (selection_probs[j] > 0.0f && !ant_visited[j]) {
-                    accumulated_prob += selection_probs[j];
-                    if (accumulated_prob >= r) {
-                        next_city = j;
-                        break;
-                    }
-                }
-            }
-
-            if (next_city == -1) {
-                printf("Error: No valid next city found for ant %d\n", i);
-            }
-
-            if (ant_visited[next_city]) {
-                printf("Error! Choosing city which is already visited!\n");
-            }
-
-            if (next_city == current_city) {
-                printf("Error! Choosing the same city again!\n");
-            }
-
-            ant_tour[step] = next_city;
-            ant_visited[next_city] = true;
-            current_city = next_city;
         }
 
-        d_rand_state[i] = local_state;
+        float r = curand_uniform(&local_state) * sum_probs;
+        float accumulated_prob = 0.0f;
+        int next_city = -1;
+
+        for (int j = 0; j < num_cities; ++j) {
+            if (selection_probs[j] > 0.0f && !ant_visited[j]) {
+                accumulated_prob += selection_probs[j];
+                if (accumulated_prob >= r) {
+                    next_city = j;
+                    break;
+                }
+            }
+        }
+
+        // if (next_city == -1) {
+        //     printf("Error: No valid next city found for ant %d\n", i);
+        // }
+
+        // if (ant_visited[next_city]) {
+        //     printf("Error! Choosing city which is already visited!\n");
+        // }
+
+        // if (next_city == current_city) {
+        //     printf("Error! Choosing the same city again!\n");
+        // }
+
+        ant_tour[step] = next_city;
+        ant_visited[next_city] = true;
+        current_city = next_city;
     }
+
+    d_rand_state[i] = local_state;
 }
+
 __global__ void computeTourLengthsKernel(
     const int* d_ant_tours,
     const float* d_distances,
@@ -114,7 +134,7 @@ __global__ void computeTourLengthsKernel(
     int num_ants,
     int num_cities
 ) {
-    int ant_idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int ant_idx = get_idx(num_ants);
     if (ant_idx >= num_ants) return;
 
     const int* tour = &d_ant_tours[ant_idx * num_cities];
@@ -131,16 +151,6 @@ __global__ void computeTourLengthsKernel(
 }
 
 void verifyToursHost(const int* h_ant_tours, int num_ants, int num_cities) {
-    // for (int ant=0; ant < 1;++ant){ // TODO: < 1
-    //     printf("Tour of ant %d:\n", ant);
-    //     const int* tour = &h_ant_tours[ant * num_cities];
-    //     printf("%d", tour[0]);
-    //     for (int i=1; i < 10; ++i) { // TODO: < 10
-    //         printf(" %d", tour[i]);
-    //     }
-    //     printf("\n");
-    // }
-
     for (int ant = 0; ant < num_ants; ++ant) {
         const int* tour = &h_ant_tours[ant * num_cities];
         bool* visited = new bool[num_cities];
@@ -184,9 +194,8 @@ TspResult solveTSPWorker(
     unsigned int seed
 ) {
     int num_cities = tsp_input.dimension;
-    int num_ants = 1;
+    int num_ants = 1971;
     size_t matrix_size = sizeof(float) * num_cities * num_cities;
-
     int* d_ant_tours;
     bool* d_ant_visited;
     curandState* d_rand_states;
@@ -194,7 +203,6 @@ TspResult solveTSPWorker(
     float* d_choice_info;
     float* d_distances;
     float* d_selection_probs;
-
     cudaMalloc(&d_ant_tours, sizeof(int) * num_ants * num_cities);
     cudaMalloc(&d_ant_visited, sizeof(bool) * num_ants * num_cities);
     cudaMalloc(&d_rand_states, sizeof(curandState) * num_ants);
@@ -202,25 +210,35 @@ TspResult solveTSPWorker(
     cudaMalloc(&d_choice_info, matrix_size);
     cudaMalloc(&d_distances, matrix_size);
     cudaMalloc(&d_selection_probs, sizeof(float) * num_ants * num_cities);
-
     cudaMemcpy(d_distances, tsp_input.distances, matrix_size, cudaMemcpyHostToDevice);
 
-    int threads_per_block = 1;
-    int num_blocks = 1;//(num_ants + threads_per_block - 1) / threads_per_block;
-    initialize_rand_states<<<num_blocks, threads_per_block>>>(d_rand_states, num_ants, seed);
+    int num_blocks = (num_ants + TPB - 1) / TPB;
+    assert(num_blocks * TPB >= num_ants);
+
+    initialize_rand_states<<<num_blocks, TPB>>>(d_rand_states, num_ants, seed);
     cudaDeviceSynchronize();
 
-    computeChoiceInfoKernel<<<num_blocks, threads_per_block>>>(d_choice_info, d_distances, num_cities, beta);
+#ifdef DEBUG
+    float* h_choice_info = new float[num_cities * num_cities];
+    for (int i=0; i < num_cities * num_cities; ++i) {
+        h_choice_info[i] = PI;
+    }
+    cudaMemcpy(d_choice_info, h_choice_info, matrix_size, cudaMemcpyHostToDevice);
+    printf("Before: d_choice_info[-1][-2] = %f\n", h_choice_info[num_cities * num_cities - 2]);
+#endif
+    computeChoiceInfoKernel<<<num_blocks, TPB>>>(d_choice_info, d_distances, num_cities, beta);
     cudaDeviceSynchronize();
+#ifdef DEBUG
+    cudaMemcpy(h_choice_info, d_choice_info, matrix_size, cudaMemcpyDeviceToHost);
+    for (int i=0; i < num_cities * num_cities; ++i) {
+        assert(h_choice_info[i] != PI);
+    }
+    printf("After: d_choice_info[-1][-2] = %f\n", h_choice_info[num_cities * num_cities - 2]);
+#endif
 
     assert(num_iter == 1);
-    assert(num_blocks * threads_per_block >= num_ants);
-    assert(num_blocks == 1);
-    assert(threads_per_block >= num_ants);
-
     for (unsigned int iter = 0; iter < num_iter; ++iter) {
-        // tourConstructionKernel<<<num_blocks, threads_per_block>>>(
-        tourConstructionKernel<<<1, 1>>>(
+        tourConstructionKernel<<<num_blocks, TPB>>>(
             d_ant_tours, d_ant_visited, d_choice_info, d_selection_probs, num_ants, num_cities, d_rand_states
         );
         cudaDeviceSynchronize();
@@ -233,7 +251,7 @@ TspResult solveTSPWorker(
         delete[] h_ant_tours;
 #endif
 
-        computeTourLengthsKernel<<<num_blocks, threads_per_block>>>(
+        computeTourLengthsKernel<<<num_blocks, TPB>>>(
             d_ant_tours, d_distances, d_tour_lengths, num_ants, num_cities
         );
         cudaDeviceSynchronize();
@@ -243,7 +261,7 @@ TspResult solveTSPWorker(
     cudaMemcpy(h_tour_lengths, d_tour_lengths, sizeof(float) * num_ants, cudaMemcpyDeviceToHost);
     cudaDeviceSynchronize();
 
-    float best_length = 1e9;
+    float best_length = FLT_MAX;
     int best_idx = -1;
     for (int i = 0; i < num_ants; ++i) {
         if (h_tour_lengths[i] < best_length) {

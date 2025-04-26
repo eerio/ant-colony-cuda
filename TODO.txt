@@ -1,6 +1,11 @@
 Worker kernel działa jakoś tam.
 Trzeba potwierdzić że on jest mniej-więcej zgodny z tym co jest w sekcji baseline papera
 
+
+Dla jednej mrówki, 9 testów ma 5x gorszy wynik
+Dla 171 mrówek, to 6 testów
+Dla 1971 mrówek, to dalej 6 testów
+
 Trzeba zaimplementować Queen version
 
 Trzeba tak wyczyścić kod, żeby te dwie wersje się różniły tylko tam gdzie trzeba

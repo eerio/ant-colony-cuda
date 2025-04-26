@@ -1,5 +1,6 @@
 NVCC = /usr/local/cuda/bin/nvcc
-NVCCFLAGS = -O3 -Iinclude -DDEBUG # For Titan V (compute capability 7.0)
+# NVCCFLAGS = -O3 -Iinclude -DDEBUG # For Titan V (compute capability 7.0)
+NVCCFLAGS = -O3 -Iinclude # For Titan V (compute capability 7.0)
 
 TSP_FILES=$(wildcard tests/*.tsp)
 GEO_TSP_FILES=$(wildcard tests/geo-*.tsp)
@@ -71,5 +72,11 @@ tests/%_tsplibsolution.out: tests/%.tsp $(TSPLIB_SOLUTIONS)
 	cost=$$(echo $$solution_line | awk -F'[: ]+' '{print $$2}'); \
 	echo "$$cost" > $@
 all-tsplib-solutions: $(patsubst tests/%.tsp, tests/%_tsplibsolution.out, $(TSP_FILES))
+
+rerun_tests:
+	rm tests/*_worker.out; srun --partition=common --time 10 --gres=gpu -- make run_worker_parallel
+
+check_results:
+	python3 check_results.py
 
 .PHONY: all clean pack test ortools

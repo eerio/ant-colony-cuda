@@ -368,10 +368,10 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
-    for (unsigned int i = 0; i < result.dimension - 1; ++i) {
+    for (unsigned int i = 0; i < result.dimension; ++i) {
         output << result.tour[i] + 1 << " ";
     }
-    output << result.tour[result.dimension - 1] + 1 << std::endl;
+    output << result.tour[0] + 1 << std::endl;
     output.close();
 
     // // Initialize CUDA random number generator
