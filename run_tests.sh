@@ -1,9 +1,0 @@
-./run_test.sh tsplib/d198.tsp
-./run_test.sh tsplib/a280.tsp
-./run_test.sh tsplib/lin318.tsp
-./run_test.sh tsplib/pcb442.tsp
-./run_test.sh tsplib/rat783.tsp
-./run_test.sh tsplib/pr1002.tsp
-./run_test.sh tsplib/pcb1173.tsp
-./run_test.sh tsplib/d1291.tsp
-./run_test.sh tsplib/pr2392.tsp
