@@ -69,7 +69,7 @@ def main():
                         ok = False
                         sys.exit(1)
 
-                    k = 5
+                    k = 1.5
                     if queen_cost > k * tsplib_cost:
                         print(f"  WARNING: queen cost {queen_cost} more than {k}x TSPLIB cost {tsplib_cost}")
                         # ok = False

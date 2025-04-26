@@ -15,6 +15,7 @@
 
 // Inclusive prefix sum (scan) - Assumed correct from previous step
 __device__ void prefixSumInclusiveArbitraryN(volatile float* sdata, unsigned int tid, unsigned int N) {
+    if (tid >= N) { return; }
      for (unsigned int stride = 1; stride < N; stride *= 2) {
         float value_from_behind = 0;
         // Read from valid index within bounds [0, N-1]
@@ -143,6 +144,7 @@ __global__ void tourConstructionKernelQueen(
             } else {
                 // --- Standard Roulette Wheel ---
                 float rand_val = curand_uniform(&local_rand_state) * total_prob;
+                rand_val = fminf(rand_val, total_prob - 1e-6f);
                 // Handle rand_val being exactly 0 slightly differently if needed,
                 // but searching from index 0 should cover it.
 
@@ -281,7 +283,7 @@ TspResult solveTSPQueen(
         computeChoiceInfoKernel<<<(num_cities * num_cities + TPB - 1) / TPB, TPB>>>(d_choice_info, d_pheromone, d_distances, num_cities, alpha, beta);
         cudaDeviceSynchronize();
 
-        size_t shared_mem_size = sizeof(float) * num_cities + sizeof(int) * num_cities;
+        size_t shared_mem_size = sizeof(float) * num_cities + sizeof(int) * num_cities + sizeof(int);
         tourConstructionKernelQueen<<<num_blocks, threads_per_block, shared_mem_size>>>(
             d_ant_tours, d_ant_visited, d_choice_info, d_selection_probs, num_ants, num_cities, d_rand_states
         );

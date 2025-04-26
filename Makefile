@@ -62,7 +62,7 @@ tests/%_worker.out: tests/%.tsp
 
 run_queen_parallel: acotsp $(TSP_FILES:.tsp=_queen.out)
 tests/%_queen.out: tests/%.tsp
-	./acotsp $< $@ QUEEN 10 1 2 0.5 425
+	./acotsp $< $@ QUEEN 1000 1 2 0.5 425
 
 TSPLIB_SOLUTIONS = tsplib/solutions
 
