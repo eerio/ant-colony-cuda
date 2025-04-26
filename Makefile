@@ -1,6 +1,8 @@
 NVCC = /usr/local/cuda/bin/nvcc
 NVCCFLAGS = -O3 -Iinclude -arch=sm_70 -DDEBUG # For Titan V (compute capability 7.0)
 
+TSP_FILES=$(wildcard tests/*.tsp)
+
 all: acotsp
 
 %.o: %.cu
@@ -40,4 +42,8 @@ test/balawender/acotsp: balawender.zip
 
 test: test/balawender/acotsp
 
-.PHONY: all clean pack test
+run_ortools_parallel: $(TSP_FILES:.tsp=_ortools.out)
+tests/%_ortools.out: tests/%.tsp
+	. .venv/bin/activate && python tsp_ortools.py $< > $@
+
+.PHONY: all clean pack test ortools
