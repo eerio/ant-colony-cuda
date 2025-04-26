@@ -1,19 +1,19 @@
 NVCC = /usr/local/cuda/bin/nvcc
 # NVCCFLAGS = -O3 -Iinclude -DDEBUG # For Titan V (compute capability 7.0)
-NVCCFLAGS = -O3 -Iinclude # For Titan V (compute capability 7.0)
+NVCCFLAGS = -O3 -Iinclude -arch=sm_75 -rdc=true# For Titan V (compute capability 7.0)
 
 TSP_FILES=$(wildcard tests/*.tsp)
 GEO_TSP_FILES=$(wildcard tests/geo-*.tsp)
 
 all: acotsp
 
-%.o: %.cu
-	# TMPDIR=build srun --partition=common --time 10 --gres=gpu:titanv -- $(NVCC) $(NVCCFLAGS) -c $< -o $@
-	TMPDIR=build srun --partition=common --time 10 --gres=gpu:rtx2080ti -- $(NVCC) $(NVCCFLAGS) -c $< -o $@
+%.o: %.cu tsp.cu
+	# TMPDIR=build srun --partition=common --time 10 --gres=gpu:titanv -- $(NVCC) $(NVCCFLAGS) --device-c $< -o $@
+	TMPDIR=build srun --partition=common --time 10 --gres=gpu:rtx2080ti -- $(NVCC) $(NVCCFLAGS) --device-c $< -o $@
 
-acotsp: main.o worker.o queen.o baseline.o
+acotsp: main.o worker.o queen.o baseline.o tsp.o
 	# TMPDIR=build srun --partition=common --time 10 --gres=gpu:titanv -- $(NVCC) $(NVCCFLAGS) $^ -o $@
-	TMPDIR=build srun --partition=common --time 10 --gres=gpu:rtx2080ti -- $(NVCC) $(NVCCFLAGS) $^ -o $@
+	TMPDIR=build srun --partition=common --time 10 --gres=gpu:rtx2080ti -- $(NVCC) $(NVCCFLAGS) $^ -lcudadevrt -o $@
 
 clean:
 	rm -rf *.o test balawender.zip acotsp out.txt
@@ -60,6 +60,10 @@ run_worker_parallel: acotsp $(TSP_FILES:.tsp=_worker.out)
 tests/%_worker.out: tests/%.tsp
 	./acotsp $< $@ WORKER 10 1 2 0.5 425
 
+run_queen_parallel: acotsp $(TSP_FILES:.tsp=_queen.out)
+tests/%_queen.out: tests/%.tsp
+	./acotsp $< $@ QUEEN 10 1 2 0.5 425
+
 TSPLIB_SOLUTIONS = tsplib/solutions
 
 tests/%_tsplibsolution.out: tests/%.tsp $(TSPLIB_SOLUTIONS)
@@ -74,9 +78,9 @@ tests/%_tsplibsolution.out: tests/%.tsp $(TSPLIB_SOLUTIONS)
 all-tsplib-solutions: $(patsubst tests/%.tsp, tests/%_tsplibsolution.out, $(TSP_FILES))
 
 rerun_tests:
-	rm tests/*_worker.out; srun --partition=common --time 10 --gres=gpu -- make run_worker_parallel
+	rm tests/*_queen.out; srun --partition=common --time 10 --gres=gpu -- make run_queen_parallel
 
 check_results:
-	python3 check_results.py
+	python3 check_results_queen.py
 
 .PHONY: all clean pack test ortools

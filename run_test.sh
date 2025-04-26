@@ -16,6 +16,6 @@ dir=$(dirname -- "$1")
 output_file="${dir}/${basename}_worker.out"
 
 make && \
-srun --partition=common --time 10 --gres=gpu:1 -- ./acotsp "$1" "$output_file" WORKER 1 1 2 0.5 42 && \
+srun --partition=common --time 10 --gres=gpu:1 -- ./acotsp "$1" "$output_file" QUEEN 1 1 2 0.5 42 && \
 head -n 1 "$output_file" && \
 grep "$basename" tsplib/solutions
