@@ -58,7 +58,7 @@ tests/%_baseline.out: tests/%.tsp
 
 run_worker_parallel: acotsp $(TSP_FILES:.tsp=_worker.out)
 tests/%_worker.out: tests/%.tsp
-	./acotsp $< $@ WORKER 1 1 2 0.5 42
+	./acotsp $< $@ WORKER 10 1 2 0.5 425
 
 TSPLIB_SOLUTIONS = tsplib/solutions
 

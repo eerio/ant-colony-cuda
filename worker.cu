@@ -5,7 +5,7 @@
 #include "tsp.h"
 
 #define PI 3.14159265358979323846
-#define TPB 7
+#define TPB 1024
 #define FLT_MAX (3.4e+38F)
 
 __device__ int get_idx(int num_ants) {
@@ -33,8 +33,10 @@ __global__ void initialize_rand_states(curandState* rand_states, int num_ants, u
 
 __global__ void computeChoiceInfoKernel(
     float* d_choice_info,
+    const float* d_pheromone,
     const float* d_distances,
     int num_cities,
+    float alpha,
     float beta
 ) {
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -48,9 +50,10 @@ __global__ void computeChoiceInfoKernel(
         if (row == col) {
             d_choice_info[idx] = 0.0f;
         } else {
+            float tau = d_pheromone[idx];
             float dist = d_distances[idx];
             float eta = (dist > 0.0f) ? 1.0f / dist : 0.0f;
-            d_choice_info[idx] = __powf(eta, beta);  // No pheromone
+            d_choice_info[idx] = __powf(tau, alpha) * __powf(eta, beta);
         }
     }
 }
@@ -185,16 +188,54 @@ void verifyToursHost(const int* h_ant_tours, int num_ants, int num_cities) {
     }
 }
 
+
+__global__ void evaporatePheromoneKernel(float* d_pheromone, float evaporation_rate, int num_cities) {
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int total = num_cities * num_cities;
+
+    for (int idx = tid; idx < total; idx += blockDim.x * gridDim.x) {
+        d_pheromone[idx] *= (1.0f - evaporation_rate);
+    }
+}
+
+__global__ void depositPheromoneKernel(
+    float* d_pheromone,
+    const int* d_ant_tours,
+    const float* d_tour_lengths,
+    int num_ants,
+    int num_cities,
+    float Q
+) {
+    int ant_idx = get_idx(num_ants);
+    if (ant_idx >= num_ants) { return; }
+
+    const int* tour = &d_ant_tours[ant_idx * num_cities];
+    float contribution = Q / d_tour_lengths[ant_idx];
+
+    for (int i = 0; i < num_cities - 1; ++i) {
+        int from = tour[i];
+        int to = tour[i + 1];
+        atomicAdd(&d_pheromone[from * num_cities + to], contribution);
+        atomicAdd(&d_pheromone[to * num_cities + from], contribution); // symmetric TSP
+    }
+
+    // Add pheromone for the return to the start city
+    int last = tour[num_cities - 1];
+    int first = tour[0];
+    atomicAdd(&d_pheromone[last * num_cities + first], contribution);
+    atomicAdd(&d_pheromone[first * num_cities + last], contribution);
+}
+
 TspResult solveTSPWorker(
     const TspInput& tsp_input,
     unsigned int num_iter,
-    float alpha,  // NOT used anymore
+    float alpha,
     float beta,
-    float evaporate,  // NOT used anymore
+    float evaporate,
     unsigned int seed
 ) {
     int num_cities = tsp_input.dimension;
-    int num_ants = 1971;
+    int num_ants = 128;
     size_t matrix_size = sizeof(float) * num_cities * num_cities;
     int* d_ant_tours;
     bool* d_ant_visited;
@@ -203,6 +244,8 @@ TspResult solveTSPWorker(
     float* d_choice_info;
     float* d_distances;
     float* d_selection_probs;
+    float* d_pheromone;
+    cudaMalloc(&d_pheromone, matrix_size);
     cudaMalloc(&d_ant_tours, sizeof(int) * num_ants * num_cities);
     cudaMalloc(&d_ant_visited, sizeof(bool) * num_ants * num_cities);
     cudaMalloc(&d_rand_states, sizeof(curandState) * num_ants);
@@ -218,6 +261,14 @@ TspResult solveTSPWorker(
     initialize_rand_states<<<num_blocks, TPB>>>(d_rand_states, num_ants, seed);
     cudaDeviceSynchronize();
 
+    // Initialize pheromones to 1.0
+    float* h_initial_pheromone = new float[num_cities * num_cities];
+    for (int i = 0; i < num_cities * num_cities; ++i) {
+        h_initial_pheromone[i] = 1.0f;
+    }
+    cudaMemcpy(d_pheromone, h_initial_pheromone, matrix_size, cudaMemcpyHostToDevice);
+    delete[] h_initial_pheromone;
+
 #ifdef DEBUG
     float* h_choice_info = new float[num_cities * num_cities];
     for (int i=0; i < num_cities * num_cities; ++i) {
@@ -226,7 +277,7 @@ TspResult solveTSPWorker(
     cudaMemcpy(d_choice_info, h_choice_info, matrix_size, cudaMemcpyHostToDevice);
     printf("Before: d_choice_info[-1][-2] = %f\n", h_choice_info[num_cities * num_cities - 2]);
 #endif
-    computeChoiceInfoKernel<<<num_blocks, TPB>>>(d_choice_info, d_distances, num_cities, beta);
+    computeChoiceInfoKernel<<<num_blocks, TPB>>>(d_choice_info, d_pheromone, d_distances, num_cities, alpha, beta);
     cudaDeviceSynchronize();
 #ifdef DEBUG
     cudaMemcpy(h_choice_info, d_choice_info, matrix_size, cudaMemcpyDeviceToHost);
@@ -236,8 +287,10 @@ TspResult solveTSPWorker(
     printf("After: d_choice_info[-1][-2] = %f\n", h_choice_info[num_cities * num_cities - 2]);
 #endif
 
-    assert(num_iter == 1);
     for (unsigned int iter = 0; iter < num_iter; ++iter) {
+        computeChoiceInfoKernel<<<num_blocks, TPB>>>(d_choice_info, d_pheromone, d_distances, num_cities, alpha, beta);
+        cudaDeviceSynchronize();
+
         tourConstructionKernel<<<num_blocks, TPB>>>(
             d_ant_tours, d_ant_visited, d_choice_info, d_selection_probs, num_ants, num_cities, d_rand_states
         );
@@ -251,8 +304,16 @@ TspResult solveTSPWorker(
         delete[] h_ant_tours;
 #endif
 
+        evaporatePheromoneKernel<<<num_blocks, TPB>>>(d_pheromone, evaporate, num_cities);
+        cudaDeviceSynchronize();
+
         computeTourLengthsKernel<<<num_blocks, TPB>>>(
             d_ant_tours, d_distances, d_tour_lengths, num_ants, num_cities
+        );
+        cudaDeviceSynchronize();
+
+        depositPheromoneKernel<<<num_blocks, TPB>>>(
+            d_pheromone, d_ant_tours, d_tour_lengths, num_ants, num_cities, 1.0 // TODO: what value Q here?
         );
         cudaDeviceSynchronize();
     }
@@ -285,6 +346,7 @@ TspResult solveTSPWorker(
     result.tour = h_best_tour;
 
     cudaFree(d_ant_tours);
+    cudaFree(d_pheromone);
     cudaFree(d_ant_visited);
     cudaFree(d_rand_states);
     cudaFree(d_tour_lengths);
