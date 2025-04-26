@@ -1,6 +1,6 @@
 NVCC = /usr/local/cuda/bin/nvcc
 # NVCCFLAGS = -O3 -Iinclude -DDEBUG # For Titan V (compute capability 7.0)
-NVCCFLAGS = -O3 -Iinclude -arch=sm_75 -rdc=true# For Titan V (compute capability 7.0)
+NVCCFLAGS = -O3 -Iinclude # For Titan V (compute capability 7.0)
 
 TSP_FILES=$(wildcard tests/*.tsp)
 GEO_TSP_FILES=$(wildcard tests/geo-*.tsp)
@@ -13,7 +13,7 @@ all: acotsp
 
 acotsp: main.o worker.o queen.o baseline.o tsp.o
 	# TMPDIR=build srun --partition=common --time 10 --gres=gpu:titanv -- $(NVCC) $(NVCCFLAGS) $^ -o $@
-	TMPDIR=build srun --partition=common --time 10 --gres=gpu:rtx2080ti -- $(NVCC) $(NVCCFLAGS) $^ -lcudadevrt -o $@
+	TMPDIR=build srun --partition=common --time 10 --gres=gpu:rtx2080ti -- $(NVCC) $(NVCCFLAGS) $^ -o $@
 
 clean:
 	rm -rf *.o test balawender.zip acotsp out.txt
@@ -77,7 +77,10 @@ tests/%_tsplibsolution.out: tests/%.tsp $(TSPLIB_SOLUTIONS)
 	echo "$$cost" > $@
 all-tsplib-solutions: $(patsubst tests/%.tsp, tests/%_tsplibsolution.out, $(TSP_FILES))
 
-rerun_tests:
+rerun_worker:
+	rm tests/*_worker.out; srun --partition=common --time 10 --gres=gpu -- make run_worker_parallel
+
+rerun_queen:
 	rm tests/*_queen.out; srun --partition=common --time 10 --gres=gpu -- make run_queen_parallel
 
 check_results:

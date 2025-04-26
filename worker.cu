@@ -2,7 +2,12 @@
 #include <curand_kernel.h>
 #include <cuda_runtime.h>
 #include <assert.h>
+#include <vector>
+#include <numeric>
+#include <algorithm>
+#include <cmath>
 #include "tsp.h"
+
 
 #define PI 3.14159265358979323846
 #define TPB 1024
@@ -141,7 +146,12 @@ TspResult solveTSPWorker(
     printf("After: d_choice_info[-1][-2] = %f\n", h_choice_info[num_cities * num_cities - 2]);
 #endif
 
+    std::vector<float> iteration_times_ms;
+    cudaEvent_t iter_start, iter_end;
+    HANDLE_ERROR(cudaEventCreate(&iter_start));
+    HANDLE_ERROR(cudaEventCreate(&iter_end));
     for (unsigned int iter = 0; iter < num_iter; ++iter) {
+        HANDLE_ERROR(cudaEventRecord(iter_start));
         computeChoiceInfoKernel<<<num_blocks, TPB>>>(d_choice_info, d_pheromone, d_distances, num_cities, alpha, beta);
         cudaDeviceSynchronize();
 
@@ -170,7 +180,14 @@ TspResult solveTSPWorker(
             d_pheromone, d_ant_tours, d_tour_lengths, num_ants, num_cities, 1.0 // TODO: what value Q here?
         );
         cudaDeviceSynchronize();
+        HANDLE_ERROR(cudaEventRecord(iter_end));
+        HANDLE_ERROR(cudaEventSynchronize(iter_end));
+        float elapsed_ms = 0.0f;
+        HANDLE_ERROR(cudaEventElapsedTime(&elapsed_ms, iter_start, iter_end));
+        iteration_times_ms.push_back(elapsed_ms);
     }
+    HANDLE_ERROR(cudaEventDestroy(iter_start));
+    HANDLE_ERROR(cudaEventDestroy(iter_end));
 
     float* h_tour_lengths = new float[num_ants];
     cudaMemcpy(h_tour_lengths, d_tour_lengths, sizeof(float) * num_ants, cudaMemcpyDeviceToHost);
@@ -207,6 +224,27 @@ TspResult solveTSPWorker(
     cudaFree(d_choice_info);
     cudaFree(d_distances);
     cudaFree(d_selection_probs);
+
+    float sum = std::accumulate(iteration_times_ms.begin(), iteration_times_ms.end(), 0.0f);
+    float mean = sum / iteration_times_ms.size();
+
+    float sq_sum = std::inner_product(
+        iteration_times_ms.begin(), iteration_times_ms.end(),
+        iteration_times_ms.begin(), 0.0f
+    );
+    float stddev = std::sqrt(sq_sum / iteration_times_ms.size() - mean * mean);
+
+    auto [min_it, max_it] = std::minmax_element(iteration_times_ms.begin(), iteration_times_ms.end());
+    float min_time = *min_it;
+    float max_time = *max_it;
+
+    printf("\n=== Iteration Timing Statistics ===\n");
+    printf("Number of iterations: %lu\n", iteration_times_ms.size());
+    printf("Min time (ms): %.3f\n", min_time);
+    printf("Max time (ms): %.3f\n", max_time);
+    printf("Mean time (ms): %.3f\n", mean);
+    printf("Stddev time (ms): %.3f\n", stddev);
+    printf("===================================\n\n");
 
     return result;
 }

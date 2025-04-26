@@ -1,6 +1,16 @@
 #pragma once
 #include <curand_kernel.h>
+#include <stdio.h>
 #include <cuda_runtime.h>
+
+#define HANDLE_ERROR(err) (HandleError(err, __FILE__, __LINE__))
+
+inline void HandleError(cudaError_t err, const char* file, int line) {
+    if (err != cudaSuccess) {
+        fprintf(stderr, "CUDA Error: %s (%s:%d)\n", cudaGetErrorString(err), file, line);
+        exit(EXIT_FAILURE);
+    }
+}
 
 struct TspInput {
     unsigned int dimension;
