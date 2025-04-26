@@ -4,6 +4,7 @@
 #include <sstream>
 #include <optional>
 #include <curand_kernel.h>
+#include <cmath>
 #include "tsp.h"
 #include "baseline.h"
 #include "worker.h"
@@ -142,7 +143,7 @@ std::optional<ProblemData> readProblemData(const std::string &filename) {
         }
     }
     // Check for end of section
-    if (!std::getline(file, line) || line != "EOF") {
+    if (!std::getline(file, line) || line.find("EOF") == std::string::npos) {
         std::cerr << "EOF not found after points." << std::endl;
         delete[] data.points;
         return {};
@@ -151,24 +152,64 @@ std::optional<ProblemData> readProblemData(const std::string &filename) {
     return data;
 }
 
+float degToRad(float deg) {
+    int deg_part = static_cast<int>(deg);
+    float min_part = deg - deg_part;
+    return M_PI * (deg_part + 5.0f * min_part / 3.0f) / 180.0f;
+}
+
+// Calculates distance between two coordinates in TSPLIB GEO format
+float geoDistance(Point2D a, Point2D b) {
+    const float RRR = 6378.388f; // Radius of Earth in kilometers according to TSPLIB
+
+    float lat_i = degToRad(a.x);
+    float lon_i = degToRad(a.y);
+    float lat_j = degToRad(b.x);
+    float lon_j = degToRad(b.y);
+
+    float q1 = cos(lon_i - lon_j);
+    float q2 = cos(lat_i - lat_j);
+    float q3 = cos(lat_i + lat_j);
+
+    float dij = static_cast<int>(RRR * acos(0.5f * ((1.0f + q1) * q2 - (1.0f - q1) * q3)) + 1.0f);
+
+    return dij;
+}
+
+
 TspInput convertToTspInput(const ProblemData &problem_data) {
     TspInput tsp_input;
     tsp_input.dimension = problem_data.dimension;
     tsp_input.distances = new float[tsp_input.dimension * tsp_input.dimension];
-    
+
     for (unsigned int i = 0; i < tsp_input.dimension; ++i) {
         for (unsigned int j = 0; j < tsp_input.dimension; ++j) {
             if (i == j) {
                 tsp_input.distances[i * tsp_input.dimension + j] = 0;
             } else {
-                float dx = problem_data.points[i].x - problem_data.points[j].x;
-                float dy = problem_data.points[i].y - problem_data.points[j].y;
-                tsp_input.distances[i * tsp_input.dimension + j] = sqrt(dx * dx + dy * dy);
+                float dist = 0.0f;
+                if (problem_data.edge_weight_type == EUC_2D) {
+                    float dx = problem_data.points[i].x - problem_data.points[j].x;
+                    float dy = problem_data.points[i].y - problem_data.points[j].y;
+                    dist = sqrt(dx * dx + dy * dy);
+                } else if (problem_data.edge_weight_type == CEIL_2D) {
+                    float dx = problem_data.points[i].x - problem_data.points[j].x;
+                    float dy = problem_data.points[i].y - problem_data.points[j].y;
+                    dist = ceil(sqrt(dx * dx + dy * dy));
+                } else if (problem_data.edge_weight_type == GEO) {
+                    dist = geoDistance(problem_data.points[i], problem_data.points[j]);
+                } else {
+                    std::cerr << "Unsupported edge weight type in convertToTspInput()." << std::endl;
+                    dist = 0.0f;
+                }
+                tsp_input.distances[i * tsp_input.dimension + j] = dist;
             }
         }
     }
+
     return tsp_input;
 }
+
 
 int main(int argc, char *argv[]) {
     // Expected arguments:
@@ -267,12 +308,12 @@ int main(int argc, char *argv[]) {
         delete[] problem_data.points;
         return 1;
     }
-    if (tsp_input.dimension > 1024) {
-        std::cerr << "Error: Problem dimension exceeds maximum limit of 1024." << std::endl;
-        delete[] problem_data.points;
-        delete[] tsp_input.distances;
-        return 1;
-    }
+    // if (tsp_input.dimension > 1024) {
+    //     std::cerr << "Error: Problem dimension exceeds maximum limit of 1024." << std::endl;
+    //     delete[] problem_data.points;
+    //     delete[] tsp_input.distances;
+    //     return 1;
+    // }
 
     // Print problem data
     // std::cout << "Problem dimension: " << problem_data.dimension << std::endl;

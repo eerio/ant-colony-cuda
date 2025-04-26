@@ -46,4 +46,8 @@ run_ortools_parallel: $(TSP_FILES:.tsp=_ortools.out)
 tests/%_ortools.out: tests/%.tsp
 	. .venv/bin/activate && python tsp_ortools.py $< > $@
 
+run_baseline_parallel: acotsp $(TSP_FILES:.tsp=_baseline.out)
+tests/%_baseline.out: tests/%.tsp
+	./acotsp $< $@ BASELINE 5 10 2 0.5 42
+
 .PHONY: all clean pack test ortools
