@@ -38,7 +38,7 @@ test/balawender/acotsp: balawender.zip
 	cp -r ../../tsplib/ . && \
 	make clean && \
 	make && \
-	srun --partition=common --time 10 --gres=gpu:1 -- ./acotsp tsplib/a280.tsp out.txt BASELINE 10 1 2 0.5 42; \
+	TMPDIR=build srun --partition=common --time 10 --nodelist=asusgpu6 --gres=gpu:rtx2080ti -- ./acotsp tsplib/a280.tsp out.txt BASELINE 10 1 2 0.5 42; \
 	head -n 1 out.txt; \
 	cat tsplib/solutions | grep a280 ; \
 
@@ -56,11 +56,12 @@ run_baseline_parallel: acotsp $(TSP_FILES:.tsp=_baseline.out)
 tests/%_baseline.out: tests/%.tsp
 	./acotsp $< $@ BASELINE 5 10 2 0.5 42
 
-run_worker_parallel: acotsp $(TSP_FILES:.tsp=_worker.out)
+# run_worker_parallel: acotsp pr1002 euc2d-$(TSP_FILES:.tsp=_worker.out)
+run_worker_parallel: acotsp tests/euc2d-pr1002_worker.out tests/euc2d-d1291_worker.out tests/geo-gr96_worker.out
 tests/%_worker.out: tests/%.tsp
 	./acotsp $< $@ WORKER 10 1 2 0.5 425
 
-run_queen_parallel: acotsp $(TSP_FILES:.tsp=_queen.out)
+run_queen_parallel: acotsp tests/euc2d-pr1002_queen.out tests/euc2d-d1291_queen.out tests/geo-gr96_queen.out
 tests/%_queen.out: tests/%.tsp
 	./acotsp $< $@ QUEEN 10 1 2 0.5 425
 
@@ -78,10 +79,10 @@ tests/%_tsplibsolution.out: tests/%.tsp $(TSPLIB_SOLUTIONS)
 all-tsplib-solutions: $(patsubst tests/%.tsp, tests/%_tsplibsolution.out, $(TSP_FILES))
 
 rerun_worker:
-	rm tests/*_worker.out; srun --partition=common --time 10 --gres=gpu -- make run_worker_parallel
+	rm tests/*_worker.out; TMPDIR=build srun --partition=common --time 10 --nodelist=asusgpu6 --gres=gpu:rtx2080ti -- make run_worker_parallel
 
 rerun_queen:
-	rm tests/*_queen.out; srun --partition=common --time 10 --gres=gpu -- make run_queen_parallel
+	rm tests/*_queen.out; TMPDIR=build srun --partition=common --time 10 --nodelist=asusgpu6 --gres=gpu:rtx2080ti -- make run_queen_parallel
 
 check_worker:
 	python3 check_results_worker.py

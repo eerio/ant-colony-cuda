@@ -114,7 +114,73 @@ RTX 2080 Ti:
 - RT cores: 68
 
 
+dla komendy:
+$ make rerun_worker 
+rm tests/*_worker.out; TMPDIR=build srun --partition=common --time 10 --nodelist=asusgpu6 --gres=gpu:rtx2080ti -- make run_worker_parallel
 
 // optymalizacje WORKER:
 1. est. speedup 98,53%
 The grid for this launch is configured to execute only 1 blocks, which is less than the GPU's 68 multiprocessors. This can underutilize some multiprocessors. If you do not intend to execute this kernel concurrently with other workloads, consider reducing the block size to have at least one block per multiprocessor or increase the size of the grid to fully utilize the available hardware resources. See the  Hardware Model description for more details on launch configurations.
+
+przed: 2156877a8610d69433e78e7364f78d788e5fc588
+./acotsp tests/euc2d-pr1002.tsp tests/euc2d-pr1002_worker.out WORKER 10 1 2 0.5 425
+./acotsp tests/euc2d-pr1002.tsp tests/euc2d-pr1002_worker.out WORKER 10 1 2 0.5 425
+
+=== Iteration Timing Statistics ===
+Number of iterations: 10
+Min time (ms): 4229.218
+Max time (ms): 4265.509
+Mean time (ms): 4246.988
+Stddev time (ms): 12.247
+===================================
+
+./acotsp tests/euc2d-d1291.tsp tests/euc2d-d1291_worker.out WORKER 10 1 2 0.5 425
+
+=== Iteration Timing Statistics ===
+Number of iterations: 10
+Min time (ms): 7299.107
+Max time (ms): 7320.148
+Mean time (ms): 7309.565
+Stddev time (ms): 5.292
+===================================
+
+./acotsp tests/geo-gr96.tsp tests/geo-gr96_worker.out WORKER 10 1 2 0.5 425
+
+=== Iteration Timing Statistics ===
+Number of iterations: 10
+Min time (ms): 23.335
+Max time (ms): 23.691
+Mean time (ms): 23.444
+Stddev time (ms): 0.095
+===================================
+
+po: a4acfe7867f360d14f85ff650154a10165f8fa0f 
+=== Iteration Timing Statistics ===
+Number of iterations: 10
+Min time (ms): 2942.690
+Max time (ms): 2949.974
+Mean time (ms): 2946.411
+Stddev time (ms): 2.000
+===================================
+
+./acotsp tests/euc2d-d1291.tsp tests/euc2d-d1291_worker.out WORKER 10 1 2 0.5 425
+
+=== Iteration Timing Statistics ===
+Number of iterations: 10
+Min time (ms): 5066.645
+Max time (ms): 5074.497
+Mean time (ms): 5071.095
+Stddev time (ms): 2.000
+===================================
+
+./acotsp tests/geo-gr96.tsp tests/geo-gr96_worker.out WORKER 10 1 2 0.5 425
+
+=== Iteration Timing Statistics ===
+Number of iterations: 10
+Min time (ms): 16.947
+Max time (ms): 18.535
+Mean time (ms): 17.198
+Stddev time (ms): 0.452
+===================================
+
+
