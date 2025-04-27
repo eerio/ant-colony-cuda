@@ -64,7 +64,7 @@ tests-small/%_worker.out: tests-small/%.tsp
 # run_queen_parallel: acotsp tests/euc2d-pr1002_queen.out tests/euc2d-d657_queen.out tests/geo-gr96_queen.out
 run_queen_parallel: acotsp $(TSP_FILES:.tsp=_queen.out)
 tests-small/%_queen.out: tests-small/%.tsp
-	./acotsp $< $@ QUEEN 50 1 2 0.5 425
+	./acotsp $< $@ QUEEN 10 1 2 0.5 425
 
 TSPLIB_SOLUTIONS = tsplib/solutions
 

@@ -9,8 +9,49 @@
 #include <cmath>
 #include "tsp.h"
 
-// Define maximum cities allowed by this kernel implementation
-#define MAX_CITIES_PER_BLOCK_KERNEL 1024
+
+#define MAX_CITIES 1024
+
+// this stores 0 in temp[0], stores sum(temp[0..n-2]) in temp[n-1], destroys temp[n-1]
+// it assumes that n is a power of two!!!!!!
+// https://users.umiacs.umd.edu/~ramanid/cmsc828e_gpusci/ScanTalk.pdf
+__device__ void prescan(float *temp, int n)
+{
+    int thid = threadIdx.x;
+    int offset = 1;
+
+    for (int d = n >> 1; d > 0; d >>= 1) // build sum in place up the tree
+    {
+        __syncthreads();
+
+        if (thid < d && (offset * (2 * thid + 2) - 1) < n)
+        {
+            int ai = offset * (2 * thid + 1) - 1;
+            int bi = offset * (2 * thid + 2) - 1;
+            temp[bi] += temp[ai];
+        }
+        offset *= 2;
+    }
+    
+    if (thid == 0) { temp[n - 1] = 0; } // clear the last element
+    
+    for (int d = 1; d < n && offset > 1; d *= 2) // traverse down tree & build scan
+    {
+        offset >>= 1;
+        __syncthreads();
+        
+        if (thid < d && (offset * (2 * thid + 2) - 1) < n)
+        {
+            int ai = offset * (2 * thid + 1) - 1;
+            int bi = offset * (2 * thid + 2) - 1;
+            
+            float t = temp[ai];
+            temp[ai] = temp[bi];
+            temp[bi] += t;
+        }
+    }    
+    // __syncthreads();
+}
 
 __global__ void tourConstructionKernelQueen(
     int *tours,
@@ -21,7 +62,7 @@ __global__ void tourConstructionKernelQueen(
 ) {
     extern __shared__ float shared_data[]; 
     float *selection_probs = shared_data;      // Shared memory for selection probs
-    int *tabu_list = (int*)&selection_probs[num_cities]; // Shared memory for tabu list
+    int *tabu_list = (int*)&selection_probs[MAX_CITIES + 1]; // Shared memory for tabu list
     float *total_sum = (float *)&tabu_list[num_cities];
 
     int queen_id = blockIdx.x; // Each block handles one queen ant
@@ -49,40 +90,51 @@ __global__ void tourConstructionKernelQueen(
         int current_city = tours[queen_id * num_cities + step - 1];
 
         // Compute selection probabilities
-        for (int city = worker_id; city < num_cities; city += blockDim.x) {
-            float prob = tabu_list[city] ? 0.0f : choice_info[current_city * num_cities + city];
-            selection_probs[city] = prob;
+        for (int city = worker_id; city < MAX_CITIES; city += blockDim.x) {
+            if (city < num_cities) {
+                float prob = tabu_list[city] ? 0.0f : choice_info[current_city * num_cities + city];
+                selection_probs[city] = prob;
+            } else {
+                selection_probs[city] = 0;
+            }
         }
         __syncthreads();
-
-        // Sum up total probability
-        float partial_sum = 0.0f;
-        for (int city = worker_id; city < num_cities; city += blockDim.x) {
-            partial_sum += selection_probs[city];
-        }
-
-        // Reduce partial sums
-        if (worker_id == 0) *total_sum = 0.0f;
+        if (worker_id == 0) { selection_probs[MAX_CITIES] = selection_probs[MAX_CITIES - 1]; }
         __syncthreads();
-        atomicAdd(total_sum, partial_sum);
+        prescan(selection_probs, MAX_CITIES); // destroys last city, but it's saved already
+        __syncthreads();
+        if (worker_id == 0) {
+            selection_probs[MAX_CITIES] += selection_probs[MAX_CITIES - 1];
+            *total_sum = selection_probs[MAX_CITIES];
+        }
         __syncthreads();
 
         // Draw random value for roulette selection
         float rand_val = curand_uniform(&local_state) * *total_sum;
 
-        // Perform I-Roulette style selection
+        // Perform Roulette Wheel-style selection
         int selected_city = -1;
-        float cumulative = 0.0f;
-
-        for (int city = 0; city < num_cities; city++) {
-            if (worker_id == 0) {
-                cumulative += selection_probs[city];
-                if (cumulative >= rand_val && selected_city == -1) {
-                    selected_city = city;
-                }
+        if (
+            (worker_id == 0 && selection_probs[1] >= rand_val)
+            || (selection_probs[worker_id + 1] >= rand_val && selection_probs[worker_id] < rand_val)
+         ) {
+            // hack; change to another shared variable
+            if (tabu_list[worker_id]) {
+                printf("This is weird! %d %f %f %f %f\n", worker_id, selection_probs[worker_id], selection_probs[worker_id + 1], rand_val, *total_sum);
+                assert(false);
             }
-            __syncthreads();
+            if (!tabu_list[worker_id]) {*total_sum = worker_id;}
         }
+        __syncthreads();
+        if (worker_id == 0 && (int)*total_sum == -1) {
+            // shouldn't happen
+            for (int city=0; city < num_cities; ++city) { if (!tabu_list[city]) { selected_city = city; break; }}
+        }
+        __syncthreads();
+        selected_city = (int)*total_sum;
+        assert(selected_city >= 0);
+        assert(selected_city < num_cities);
+        assert(!tabu_list[selected_city]);
 
         if (worker_id == 0) {
             tours[queen_id * num_cities + step] = selected_city;
@@ -122,7 +174,7 @@ TspResult solveTSPQueen(
     int num_blocks = num_queens; // 68; // rtx 2080ti has 68 SMs
     // int threads_per_block = (68 + num_workers - 1) / 68;
     
-    int float_section_size = num_cities * sizeof(float);  // selection_probs
+    int float_section_size = (MAX_CITIES + 1) * sizeof(float);  // selection_probs
     // ant_visited; round up to multiple of 4
     int int_section_size = num_cities * sizeof(int);
     int thread_memory_size = float_section_size + int_section_size + sizeof(float);
