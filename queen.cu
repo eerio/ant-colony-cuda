@@ -249,7 +249,6 @@ TspResult solveTSPQueen(
     int num_blocks = num_ants; 
     int threads_per_block = num_cities;
 
-    assert(num_cities <= MAX_CITIES);
     assert(num_blocks <= MAX_BLOCKS);
     assert(threads_per_block <= MAX_TPB);
     assert(num_blocks * threads_per_block >= num_ants);

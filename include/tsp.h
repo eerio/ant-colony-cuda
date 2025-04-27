@@ -5,8 +5,6 @@
 
 #define MAX_BLOCKS 1024
 #define MAX_TPB 1024
-#define MAX_CITIES 4096
-
 
 #define HANDLE_ERROR(err) (HandleError(err, __FILE__, __LINE__))
 

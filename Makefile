@@ -1,6 +1,7 @@
 NVCC = /usr/local/cuda/bin/nvcc
 # NVCCFLAGS = -O3 -Iinclude -DDEBUG # For Titan V (compute capability 7.0)
-NVCCFLAGS = -O3 -Iinclude -G -g# For Titan V (compute capability 7.0)
+# NVCCFLAGS = -O3 -Iinclude -G -g -DMAX_SHMEM_SIZE=24576 # For Titan V (compute capability 7.0)
+NVCCFLAGS = -O3 -Iinclude -G -g # For Titan V (compute capability 7.0)
 
 TSP_FILES=$(wildcard tests/*.tsp)
 GEO_TSP_FILES=$(wildcard tests/geo-*.tsp)
