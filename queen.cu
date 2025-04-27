@@ -64,6 +64,7 @@ __global__ void tourConstructionKernelQueen(
     float *selection_probs = shared_data;      // Shared memory for selection probs
     int *tabu_list = (int*)&selection_probs[MAX_CITIES + 1]; // Shared memory for tabu list
     float *total_sum = (float *)&tabu_list[num_cities];
+    float *row_choice_info = (float *)&total_sum[1];
 
     int queen_id = blockIdx.x; // Each block handles one queen ant
     int worker_id = threadIdx.x; // Each thread in block is a worker (city checker)
@@ -89,10 +90,15 @@ __global__ void tourConstructionKernelQueen(
     for (int step = 1; step < num_cities; step++) {
         int current_city = tours[queen_id * num_cities + step - 1];
 
+        for (int j=worker_id; j < num_cities; j += blockDim.x) {
+            row_choice_info[j] = choice_info[current_city * num_cities + j];
+        }
+        __syncthreads();
+
         // Compute selection probabilities
         for (int city = worker_id; city < MAX_CITIES; city += blockDim.x) {
             if (city < num_cities) {
-                float prob = tabu_list[city] ? 0.0f : choice_info[current_city * num_cities + city];
+                float prob = tabu_list[city] ? 0.0f : row_choice_info[city];
                 selection_probs[city] = prob;
             } else {
                 selection_probs[city] = 0;
@@ -177,7 +183,7 @@ TspResult solveTSPQueen(
     int float_section_size = (MAX_CITIES + 1) * sizeof(float);  // selection_probs
     // ant_visited; round up to multiple of 4
     int int_section_size = num_cities * sizeof(int);
-    int thread_memory_size = float_section_size + int_section_size + sizeof(float);
+    int thread_memory_size = float_section_size + int_section_size + sizeof(float) + (num_cities * sizeof(float));
     
     // 4: number of units on a single SM of RTX 2080 Ti
     assert(thread_memory_size < max_shmem_per_block / 4);
