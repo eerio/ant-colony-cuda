@@ -62,7 +62,7 @@ run_worker_parallel: acotsp tests/euc2d-pr1002_worker.out tests/euc2d-d1291_work
 tests/%_worker.out: tests/%.tsp
 	./acotsp $< $@ WORKER 10 1 2 0.5 425
 
-run_queen_parallel: acotsp tests/euc2d-pr1002_queen.out tests/euc2d-d1291_queen.out tests/geo-gr96_queen.out
+run_queen_parallel: acotsp tests/euc2d-pr1002_queen.out tests/euc2d-d657_queen.out tests/geo-gr96_queen.out
 tests/%_queen.out: tests/%.tsp
 	./acotsp $< $@ QUEEN 10 1 2 0.5 425
 

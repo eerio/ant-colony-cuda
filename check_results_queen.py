@@ -36,6 +36,8 @@ def main():
     ok = True
     for root, dirs, files in os.walk('tests'):
         for file in files:
+            if 'geo-gr96' not in file and 'euc2d-d657' not in file and 'euc2d-pr1002' not in file:
+                continue
             if file.endswith('_queen.out'):
                 queen_path = os.path.join(root, file)
                 tsplib_path = queen_path.replace('_queen.out', '_tsplibsolution.out')

@@ -9,229 +9,91 @@
 #include <cmath>
 #include "tsp.h"
 
-// #include <cuda_runtime.h>
-// #include <curand_kernel.h>
-// #include <float.h> // For FLT_EPSILON
-// #include <stdio.h> // Uncomment for printf debugging
-
-// Enable printf from device: Compile with e.g. -arch=sm_70 -rdc=true, link with -lcudadevrt
-// #define KERNEL_DEBUG
-
-// Inclusive prefix sum (scan) - Assumed correct from previous step
-__device__ void prefixSumInclusiveArbitraryN(volatile float* sdata, unsigned int tid, unsigned int N) {
-    if (tid >= N) { return; }
-     for (unsigned int stride = 1; stride < N; stride *= 2) {
-        float value_from_behind = 0;
-        // Read from valid index within bounds [0, N-1]
-        if (tid >= stride && tid < N) {
-             value_from_behind = sdata[tid - stride];
-        }
-        __syncthreads(); // Ensure all reads complete before writes
-        // Write to valid index within bounds [0, N-1]
-        if (tid >= stride && tid < N) {
-             sdata[tid] += value_from_behind;
-        }
-        __syncthreads(); // Ensure all writes complete before next stride
-    }
-}
-
+// Define maximum cities allowed by this kernel implementation
+#define MAX_CITIES_PER_BLOCK_KERNEL 1024
 
 __global__ void tourConstructionKernelQueen(
-    int* d_ant_tours,      // Output: Tours for each ant [num_ants * num_cities]
-    bool* d_ant_visited,   // Global visited flags [num_ants * num_cities]
-    float* d_choice_info,  // Precomputed pheromone^alpha * heuristic^beta [num_cities * num_cities]
-    float* d_selection_probs, // Workspace - unused
+    int *tours,
+    const float *choice_info,
     int num_ants,
     int num_cities,
-    curandState* d_rand_states // Per-ant random states
+    curandState *states
 ) {
-    // --- Basic Setup ---
-    int ant_id = blockIdx.x;
-    int worker_tid = threadIdx.x; // Represents potential next city index
+    extern __shared__ float shared_data[]; 
+    float *selection_probs = shared_data;      // Shared memory for selection probs
+    int *tabu_list = (int*)&selection_probs[num_cities]; // Shared memory for tabu list
+    float *total_sum = (float *)&tabu_list[num_cities];
 
-    // Boundary checks
-    if (ant_id >= num_ants) return;
-    // Handle trivial case where no tour needs construction
-    if (num_cities <= 1) {
-         if (num_cities == 1 && worker_tid == 0) {
-             d_ant_tours[ant_id * num_cities + 0] = 0; // Tour is just city 0
-         }
-         return;
+    int queen_id = blockIdx.x; // Each block handles one queen ant
+    int worker_id = threadIdx.x; // Each thread in block is a worker (city checker)
+
+    if (queen_id >= num_ants) return;
+
+    curandState local_state = states[queen_id]; // Each queen uses its own RNG state
+
+    // Initialize tabu list
+    for (int city = worker_id; city < num_cities; city += blockDim.x) {
+        tabu_list[city] = false;
     }
-
-    // --- Shared Memory ---
-    extern __shared__ char shared_mem[];
-    int* s_visited_flags = (int*)shared_mem; // 1 if unvisited, 0 if visited
-    float* s_step_probs = (float*)(shared_mem + num_cities * sizeof(int)); // Raw probabilities for this step
-    // Place broadcast variable carefully at the end
-    volatile int* s_next_city_ptr = (volatile int*)(&s_step_probs[num_cities]); // Requires +sizeof(int) shared mem
-
-    // --- Initialization ---
-    curandState local_rand_state = d_rand_states[ant_id];
-
-    // Initialize shared visited flags & clear global flags for this ant
-    if (worker_tid < num_cities) {
-        s_visited_flags[worker_tid] = 1; // Mark all as unvisited locally
-        d_ant_visited[ant_id * num_cities + worker_tid] = false; // Clear global flag
-    }
-    // Initialize padding area in shared memory if blockDim.x > num_cities
-    // else if (worker_tid < blockDim.x) {
-    //     s_visited_flags[worker_tid] = 0; // Ensure padding doesn't interfere
-    // }
     __syncthreads();
 
-    int start_city = 0; // Fixed start city
-    int current_city = start_city;
-
-    // Set start city state
-    if (worker_tid == 0) { // Only thread 0 writes global tour/visited start state
-        d_ant_tours[ant_id * num_cities + 0] = start_city;
-        d_ant_visited[ant_id * num_cities + start_city] = true;
+    // Randomly select initial city
+    int start_city = curand(&local_state) % num_cities;
+    if (worker_id == 0) {
+        tours[queen_id * num_cities + 0] = start_city;
+        tabu_list[start_city] = true;
     }
-    // The specific thread corresponding to start_city marks it visited in shared memory
-    if (worker_tid == start_city) {
-         s_visited_flags[start_city] = 0;
-    }
-    __syncthreads(); // Ensure shared flag is set before first step
+    __syncthreads();
 
+    for (int step = 1; step < num_cities; step++) {
+        int current_city = tours[queen_id * num_cities + step - 1];
 
-    // --- Tour Construction Loop ---
-    int remaining_cities = num_cities - 1;
-    for (int step = 1; step < num_cities; ++step) {
-
-        // 1. Calculate Step Probabilities based on current_city
-        float prob = 0.0f;
-        if (worker_tid < num_cities) {
-            // Probability is only non-zero if the city 'worker_tid' has NOT been visited
-            if (s_visited_flags[worker_tid] == 1) {
-                // Ensure we don't use d_choice_info diagonal or invalid values
-                float choice_val = d_choice_info[current_city * num_cities + worker_tid];
-                // Ensure probability is non-negative
-                prob = fmaxf(0.0f, choice_val);
-            } // else prob remains 0.0f
-            s_step_probs[worker_tid] = prob;
+        // Compute selection probabilities
+        for (int city = worker_id; city < num_cities; city += blockDim.x) {
+            float prob = tabu_list[city] ? 0.0f : choice_info[current_city * num_cities + city];
+            selection_probs[city] = prob;
         }
-        // Ensure padding area (if any) has zero probability
-        // else if (worker_tid < blockDim.x) {
-        //    s_step_probs[worker_tid] = 0.0f;
-        // }
-        __syncthreads(); // Ensure all probabilities are written to shared memory
-
-        // 2. Calculate Cumulative Probabilities (Scan)
-        // Pass only the valid range [0..num_cities-1] to the scan function
-        prefixSumInclusiveArbitraryN(s_step_probs, worker_tid, num_cities);
-        // s_step_probs[num_cities - 1] now holds the total sum of probabilities
-
-        // 3. Select Next City (Thread 0 coordinates)
-        int next_city = -1; // Initialize as "not found"
-        if (worker_tid == 0) {
-            float total_prob = 0.0f;
-            // Read total probability safely
-            if (num_cities > 0) { // Should always be true here due to earlier check
-                total_prob = s_step_probs[num_cities - 1];
-            }
-
-            if (total_prob <= FLT_EPSILON || remaining_cities <= 0) {
-                // --- Fallback: No valid probabilities or no cities left ---
-                next_city = -1;
-                // Find the *first* available city index marked as unvisited in shared memory
-                for(int c = 0; c < num_cities; ++c) {
-                    if (s_visited_flags[c] == 1) {
-                        next_city = c;
-                        break;
-                    }
-                }
-                // If next_city is STILL -1 here, it means all flags are 0, but step < num_cities. This is an error state.
-                if (next_city == -1) {
-                     *s_next_city_ptr = -1; // Signal failure clearly
-                }
-            } else {
-                // --- Standard Roulette Wheel ---
-                float rand_val = curand_uniform(&local_rand_state) * total_prob;
-                rand_val = fminf(rand_val, total_prob - 1e-6f);
-                // Handle rand_val being exactly 0 slightly differently if needed,
-                // but searching from index 0 should cover it.
-
-                // Search for the first unvisited city whose cumulative probability range covers rand_val
-                next_city = -1; // Reset before search
-                for (int city_idx = 0; city_idx < num_cities; ++city_idx) {
-                    // Check: Is this city unvisited? AND Does its cumulative probability cover rand_val?
-                    if (s_visited_flags[city_idx] == 1 && rand_val <= s_step_probs[city_idx]) {
-                        // Check if this is the first city in the cumulative list that satisfies this.
-                        // Because we iterate 0 to N-1, the first hit IS the correct one.
-                        // Need to handle potential case where rand_val exactly equals a previous cumulative sum
-                        // for a VISITED city.
-                        float prev_cum_prob = (city_idx == 0) ? 0.0f : s_step_probs[city_idx - 1];
-                        if (rand_val > prev_cum_prob || city_idx == 0) { // Ensure rand_val falls *within* this city's specific probability mass
-                           next_city = city_idx;
-                           break; // Found the city
-                        }
-                        // If rand_val == prev_cum_prob, it belongs to the previous city's range end.
-                        // The loop will continue and find the correct bin.
-                    }
-                }
-
-                 // If loop finished but no city found (should only happen if total_prob > 0 but all contributing cities are somehow flagged visited - logic error)
-                 if (next_city == -1 || s_visited_flags[next_city] == 0) {
-                     // --- Fallback (Selection algorithm failed) ---
-                     next_city = -1;
-                     for(int c = 0; c < num_cities; ++c) {
-                         if (s_visited_flags[c] == 1) {
-                             next_city = c; // Pick first available as last resort
-                             break;
-                         }
-                     }
-                     if (next_city == -1) { // Should be impossible if total_prob > 0
-                         *s_next_city_ptr = -1; // Signal failure
-                     }
-                 }
-            }
-
-            // 4. Broadcast chosen city (or -1 for failure)
-            // This assignment happens ONLY IF thread 0 successfully found a next_city (either via roulette or fallback)
-             if (next_city != -1) {
-                 *s_next_city_ptr = next_city;
-                 // Update global state (only thread 0 does this for the step)
-                 d_ant_tours[ant_id * num_cities + step] = next_city;
-                 d_ant_visited[ant_id * num_cities + next_city] = true;
-             } else {
-                 // If next_city remained -1 after all checks, signal failure
-                 *s_next_city_ptr = -1;
-             }
-        } // End if worker_tid == 0
-
-        // 5. Synchronize and Prepare for Next Step
-        __syncthreads(); // Ensure s_next_city_ptr written by thread 0 is visible to all
-
-        int chosen_city_for_this_step = *s_next_city_ptr; // All threads read broadcast value
-
-        if (chosen_city_for_this_step == -1) {
-             // Ant failed to find a next city, stop its tour construction
-#ifdef KERNEL_DEBUG
-            // if(ant_id == 0 && worker_tid == 0) printf("Ant 0, Step %d: Halting due to selection failure.\n", step);
-#endif
-             break;
-        }
-
-        // Update local 'current_city' for the *next* iteration's probability calculation
-        current_city = chosen_city_for_this_step;
-        remaining_cities--; // Decrement count of cities left to visit
-
-        // Mark the chosen city as visited IN SHARED memory for the next iteration
-        // Done by the thread whose ID matches the chosen city
-        if (worker_tid == current_city) { // 'current_city' now holds the city chosen in this step
-             s_visited_flags[current_city] = 0;
-        }
-
-        // Synchronize to ensure shared visited flag update is visible before the next loop iteration starts
         __syncthreads();
 
-    } // End tour construction loop (step)
+        // Sum up total probability
+        float partial_sum = 0.0f;
+        for (int city = worker_id; city < num_cities; city += blockDim.x) {
+            partial_sum += selection_probs[city];
+        }
 
-    // --- Finalization ---
-    // Save the final random state back to global memory
-    if (worker_tid == 0) {
-        d_rand_states[ant_id] = local_rand_state;
+        // Reduce partial sums
+        if (worker_id == 0) *total_sum = 0.0f;
+        __syncthreads();
+        atomicAdd(total_sum, partial_sum);
+        __syncthreads();
+
+        // Draw random value for roulette selection
+        float rand_val = curand_uniform(&local_state) * *total_sum;
+
+        // Perform I-Roulette style selection
+        int selected_city = -1;
+        float cumulative = 0.0f;
+
+        for (int city = 0; city < num_cities; city++) {
+            if (worker_id == 0) {
+                cumulative += selection_probs[city];
+                if (cumulative >= rand_val && selected_city == -1) {
+                    selected_city = city;
+                }
+            }
+            __syncthreads();
+        }
+
+        if (worker_id == 0) {
+            tours[queen_id * num_cities + step] = selected_city;
+            tabu_list[selected_city] = true;
+        }
+        __syncthreads();
+    }
+
+    // Save RNG state
+    if (worker_id == 0) {
+        states[queen_id] = local_state;
     }
 }
 
@@ -244,35 +106,62 @@ TspResult solveTSPQueen(
     unsigned int seed
 ) {
     int num_cities = tsp_input.dimension;
-    int num_ants = num_cities;
-    // One queen = one block; one city per thread
-    int num_blocks = num_ants; 
-    int threads_per_block = num_cities;
+    int num_queens = 10;
+    int num_workers = num_cities;
+    assert(num_cities >= num_workers);
+    assert(num_cities / num_workers <= 32);
 
-    assert(num_blocks <= MAX_BLOCKS);
-    assert(threads_per_block <= MAX_TPB);
-    assert(num_blocks * threads_per_block >= num_ants);
+    int value;
+    cudaDeviceGetAttribute(&value, cudaDevAttrMaxSharedMemoryPerBlock, 0);
+    const int max_shmem_per_block = value;
+
+    // optimization: assign threads uniformly to blocks
+    // int num_blocks = (MAX_TPB + num_workers - 1) / MAX_TPB;
+    // int threads_per_block = MAX_TPB;
+    int num_blocks = num_queens; // 68; // rtx 2080ti has 68 SMs
+    // int threads_per_block = (68 + num_workers - 1) / 68;
     
+    int float_section_size = num_cities * sizeof(float);  // selection_probs
+    // ant_visited; round up to multiple of 4
+    int int_section_size = num_cities * sizeof(int);
+    int thread_memory_size = float_section_size + int_section_size + sizeof(float);
+    
+    // 4: number of units on a single SM of RTX 2080 Ti
+    assert(thread_memory_size < max_shmem_per_block / 4);
+    int threads_per_block = num_workers; // max_shmem_per_block / thread_memory_size;
+    int shared_memory_size = thread_memory_size; // per block!
+
+    cudaDeviceGetAttribute(&value, cudaDevAttrMaxThreadsPerBlock, 0);
+    assert(threads_per_block > 0);
+    assert(threads_per_block <= value);
+    assert(shared_memory_size > 0);
+    assert(shared_memory_size <= max_shmem_per_block);
+    cudaDeviceGetAttribute(&value, cudaDevAttrMaxSharedMemoryPerMultiprocessor, 0);
+    assert(num_blocks / 68 <= 32); // rtx 2080ti: max 32 blocks per SM
+    assert(num_blocks <= MAX_BLOCKS);
+
+    printf("Config: num_blocks: %d, tpb: %d, shmem: %d\n", num_blocks, threads_per_block, shared_memory_size);
+
     size_t matrix_size = sizeof(float) * num_cities * num_cities;
     int* d_ant_tours;
-    bool* d_ant_visited;
+    // bool* d_ant_visited;
     curandState* d_rand_states;
     float* d_tour_lengths;
     float* d_choice_info;
     float* d_distances;
-    float* d_selection_probs;
+    // float* d_selection_probs;
     float* d_pheromone;
     cudaMalloc(&d_pheromone, matrix_size);
-    cudaMalloc(&d_ant_tours, sizeof(int) * num_ants * num_cities);
-    cudaMalloc(&d_ant_visited, sizeof(bool) * num_ants * num_cities);
-    cudaMalloc(&d_rand_states, sizeof(curandState) * num_ants);
-    cudaMalloc(&d_tour_lengths, sizeof(float) * num_ants);
+    cudaMalloc(&d_ant_tours, sizeof(int) * num_queens * num_cities);
+    // cudaMalloc(&d_ant_visited, sizeof(bool) * num_queens * num_cities);
+    cudaMalloc(&d_rand_states, sizeof(curandState) * num_queens);
+    cudaMalloc(&d_tour_lengths, sizeof(float) * num_queens);
     cudaMalloc(&d_choice_info, matrix_size);
     cudaMalloc(&d_distances, matrix_size);
-    cudaMalloc(&d_selection_probs, sizeof(float) * num_ants * num_cities);
+    // cudaMalloc(&d_selection_probs, sizeof(float) * num_queens * num_cities);
     cudaMemcpy(d_distances, tsp_input.distances, matrix_size, cudaMemcpyHostToDevice);
 
-    initializeRandStates(d_rand_states, num_ants, seed);
+    initializeRandStates(d_rand_states, num_queens, seed);
     initializePheromones(d_pheromone, num_cities);
     
     std::vector<float> iteration_times_ms;
@@ -283,27 +172,27 @@ TspResult solveTSPQueen(
         HANDLE_ERROR(cudaEventRecord(iter_start));
         computeChoiceInfo(d_choice_info, d_pheromone, d_distances, num_cities, alpha, beta);
 
-        tourConstructionKernelQueen<<<num_blocks, threads_per_block>>>(
-            d_ant_tours, d_ant_visited, d_choice_info, d_selection_probs, num_ants, num_cities, d_rand_states
+        tourConstructionKernelQueen<<<num_blocks, threads_per_block, shared_memory_size>>>(
+            d_ant_tours, d_choice_info, num_queens, num_cities, d_rand_states
         );
         cudaDeviceSynchronize();
 
 #ifdef DEBUG
-        int* h_ant_tours = new int[num_ants * num_cities];
-        cudaMemcpy(h_ant_tours, d_ant_tours, sizeof(int) * num_ants * num_cities, cudaMemcpyDeviceToHost);
+        int* h_ant_tours = new int[num_queens * num_cities];
+        cudaMemcpy(h_ant_tours, d_ant_tours, sizeof(int) * num_queens * num_cities, cudaMemcpyDeviceToHost);
         cudaDeviceSynchronize();
-        verifyToursHost(h_ant_tours, num_ants, num_cities);
+        verifyToursHost(h_ant_tours, num_queens, num_cities);
         delete[] h_ant_tours;
 #endif
 
         evaporatePheromone(d_pheromone, evaporate, num_cities);
 
         computeTourLengths(
-            d_ant_tours, d_distances, d_tour_lengths, num_ants, num_cities
+            d_ant_tours, d_distances, d_tour_lengths, num_queens, num_cities
         );
 
         depositPheromone(
-            d_pheromone, d_ant_tours, d_tour_lengths, num_ants, num_cities
+            d_pheromone, d_ant_tours, d_tour_lengths, num_queens, num_cities
         );
 
         HANDLE_ERROR(cudaEventRecord(iter_end));
@@ -315,13 +204,13 @@ TspResult solveTSPQueen(
     HANDLE_ERROR(cudaEventDestroy(iter_start));
     HANDLE_ERROR(cudaEventDestroy(iter_end));
 
-    float* h_tour_lengths = new float[num_ants];
-    cudaMemcpy(h_tour_lengths, d_tour_lengths, sizeof(float) * num_ants, cudaMemcpyDeviceToHost);
+    float* h_tour_lengths = new float[num_queens];
+    cudaMemcpy(h_tour_lengths, d_tour_lengths, sizeof(float) * num_queens, cudaMemcpyDeviceToHost);
     cudaDeviceSynchronize();
 
     float best_length = FLT_MAX;
     int best_idx = -1;
-    for (int i = 0; i < num_ants; ++i) {
+    for (int i = 0; i < num_queens; ++i) {
         if (h_tour_lengths[i] < best_length) {
             best_length = h_tour_lengths[i];
             best_idx = i;
@@ -344,12 +233,12 @@ TspResult solveTSPQueen(
 
     cudaFree(d_ant_tours);
     cudaFree(d_pheromone);
-    cudaFree(d_ant_visited);
+    // cudaFree(d_ant_visited);
     cudaFree(d_rand_states);
     cudaFree(d_tour_lengths);
     cudaFree(d_choice_info);
     cudaFree(d_distances);
-    cudaFree(d_selection_probs);
+    // cudaFree(d_selection_probs);
 
     float sum = std::accumulate(iteration_times_ms.begin(), iteration_times_ms.end(), 0.0f);
     float mean = sum / iteration_times_ms.size();
