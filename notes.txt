@@ -219,3 +219,38 @@ Mean time (ms): 22.345
 Stddev time (ms): 0.068
 ===================================
 
+
+
+Optimization: dont use shared for tour! f15a20cc6aedca546b45f4d84e481f29f89720dc
+./acotsp tests/euc2d-pr1002.tsp tests/euc2d-pr1002_worker.out WORKER 10 1 2 0.5 425
+Config: num_blocks: 272, tpb: 9, shmem: 45108
+
+=== Iteration Timing Statistics ===
+Number of iterations: 10
+Min time (ms): 4284.907
+Max time (ms): 4291.838
+Mean time (ms): 4287.354
+Stddev time (ms): 2.828
+===================================
+
+./acotsp tests/euc2d-d1291.tsp tests/euc2d-d1291_worker.out WORKER 10 1 2 0.5 425
+Config: num_blocks: 272, tpb: 7, shmem: 45192
+
+=== Iteration Timing Statistics ===
+Number of iterations: 10
+Min time (ms): 10403.076
+Max time (ms): 10418.067
+Mean time (ms): 10410.303
+Stddev time (ms): 4.000
+===================================
+
+./acotsp tests/geo-gr96.tsp tests/geo-gr96_worker.out WORKER 10 1 2 0.5 425
+Config: num_blocks: 272, tpb: 102, shmem: 48960
+
+=== Iteration Timing Statistics ===
+Number of iterations: 10
+Min time (ms): 22.387
+Max time (ms): 22.497
+Mean time (ms): 22.430
+Stddev time (ms): 0.035
+===================================
