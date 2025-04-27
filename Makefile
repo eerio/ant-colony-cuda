@@ -9,11 +9,11 @@ all: acotsp
 
 %.o: %.cu tsp.cu
 	# TMPDIR=build srun --partition=common --time 10 --gres=gpu:titanv -- $(NVCC) $(NVCCFLAGS) --device-c $< -o $@
-	TMPDIR=build srun --partition=common --time 10 --gres=gpu:rtx2080ti -- $(NVCC) $(NVCCFLAGS) --device-c $< -o $@
+	TMPDIR=build srun --partition=common --time 10 --nodelist=asusgpu6 --gres=gpu:rtx2080ti -- $(NVCC) $(NVCCFLAGS) --device-c $< -o $@
 
 acotsp: main.o worker.o queen.o baseline.o tsp.o
 	# TMPDIR=build srun --partition=common --time 10 --gres=gpu:titanv -- $(NVCC) $(NVCCFLAGS) $^ -o $@
-	TMPDIR=build srun --partition=common --time 10 --gres=gpu:rtx2080ti -- $(NVCC) $(NVCCFLAGS) $^ -o $@
+	TMPDIR=build srun --partition=common --time 10 --nodelist=asusgpu6 --gres=gpu:rtx2080ti -- $(NVCC) $(NVCCFLAGS) $^ -o $@
 
 clean:
 	rm -rf *.o test balawender.zip acotsp out.txt

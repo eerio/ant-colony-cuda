@@ -112,3 +112,9 @@ RTX 2080 Ti:
 - cores / SM: 64
 - tensor cores / SM: 8
 - RT cores: 68
+
+
+
+// optymalizacje WORKER:
+1. est. speedup 98,53%
+The grid for this launch is configured to execute only 1 blocks, which is less than the GPU's 68 multiprocessors. This can underutilize some multiprocessors. If you do not intend to execute this kernel concurrently with other workloads, consider reducing the block size to have at least one block per multiprocessor or increase the size of the grid to fully utilize the available hardware resources. See the  Hardware Model description for more details on launch configurations.

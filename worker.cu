@@ -10,10 +10,8 @@
 #include "tsp.h"
 
 __global__ void tourConstructionKernelWorker(
-    int* d_ant_tours,
-    bool* d_ant_visited,
-    float* d_choice_info,
-    float* d_selection_probs,
+    int* d_ant_tours, // [A * N global]
+    const float* d_choice_info, // [N * N global]
     int num_ants,
     int num_cities,
     curandState* d_rand_state
@@ -22,8 +20,12 @@ __global__ void tourConstructionKernelWorker(
     if (ant_idx >= num_ants) return;
     int i = ant_idx;
 
-    int* ant_tour = &d_ant_tours[i * num_cities];
-    bool* ant_visited = &d_ant_visited[i * num_cities];
+    // register file, 16k x 32b
+    float selection_probs[MAX_CITIES];
+    // int* ant_tour = &d_ant_tours[i * num_cities];
+    // bool* ant_visited = &d_ant_visited[i * num_cities];
+    int ant_tour[MAX_CITIES];
+    bool ant_visited[MAX_CITIES];
 
     for (int j = 0; j < num_cities; ++j) ant_visited[j] = false;
 
@@ -35,7 +37,7 @@ __global__ void tourConstructionKernelWorker(
 
     for (int step = 1; step < num_cities; ++step) {
         float sum_probs = 0.0f;
-        float* selection_probs = &d_selection_probs[i * num_cities];
+        // float* selection_probs = &d_selection_probs[i * num_cities];
 
         for (int j = 0; j < num_cities; ++j) {
             if (!ant_visited[j]) {
@@ -61,21 +63,13 @@ __global__ void tourConstructionKernelWorker(
             }
         }
 
-        // if (next_city == -1) {
-        //     printf("Error: No valid next city found for ant %d\n", i);
-        // }
-
-        // if (ant_visited[next_city]) {
-        //     printf("Error! Choosing city which is already visited!\n");
-        // }
-
-        // if (next_city == current_city) {
-        //     printf("Error! Choosing the same city again!\n");
-        // }
-
         ant_tour[step] = next_city;
         ant_visited[next_city] = true;
         current_city = next_city;
+    }
+
+    for (int j=0; j < num_cities; ++j) {
+        d_ant_tours[i * num_cities + j] = ant_tour[j];
     }
 
     d_rand_state[i] = local_state;
@@ -92,9 +86,13 @@ TspResult solveTSPWorker(
 ) {
     int num_cities = tsp_input.dimension;
     int num_ants = num_cities;
-    int num_blocks = (MAX_TPB + num_ants - 1) / MAX_TPB;
-    int threads_per_block = MAX_TPB;
-    
+    // optimization: assign threads uniformly to blocks
+    // int num_blocks = (MAX_TPB + num_ants - 1) / MAX_TPB;
+    // int threads_per_block = MAX_TPB;
+    int num_blocks = 68; // rtx 2080ti
+    int threads_per_block = (68 + num_ants - 1) / 68;
+
+    assert(num_cities <= MAX_CITIES);
     assert(num_blocks <= MAX_BLOCKS);
     assert(threads_per_block <= MAX_TPB);
     assert(num_blocks * threads_per_block >= num_ants);
@@ -130,7 +128,7 @@ TspResult solveTSPWorker(
         computeChoiceInfo(d_choice_info, d_pheromone, d_distances, num_cities, alpha, beta);
 
         tourConstructionKernelWorker<<<num_blocks, threads_per_block>>>(
-            d_ant_tours, d_ant_visited, d_choice_info, d_selection_probs, num_ants, num_cities, d_rand_states
+            d_ant_tours, d_choice_info, num_ants, num_cities, d_rand_states
         );
         cudaDeviceSynchronize();
 
