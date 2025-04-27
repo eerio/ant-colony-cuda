@@ -91,7 +91,7 @@ TspResult solveTSPWorker(
     unsigned int seed
 ) {
     int num_cities = tsp_input.dimension;
-    int num_ants = 128;
+    int num_ants = num_cities;
     int num_blocks = (MAX_TPB + num_ants - 1) / MAX_TPB;
     int threads_per_block = MAX_TPB;
     
