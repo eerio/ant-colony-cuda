@@ -254,3 +254,30 @@ Max time (ms): 22.497
 Mean time (ms): 22.430
 Stddev time (ms): 0.035
 ===================================
+
+
+
+
+OPTIMIZATION: Parallel sum! 4eb62e1e5d6ff2fc2f92a136bf1077ec4a8decf7 
+
+./acotsp tests-small/euc2d-pr1002.tsp tests-small/euc2d-pr1002_queen.out QUEEN 10 1 2 0.5 425
+Config: num_blocks: 68, tpb: 1002, shmem: 8112
+
+=== Iteration Timing Statistics ===
+Number of iterations: 10
+Min time (ms): 42.871
+Max time (ms): 44.338
+Mean time (ms): 43.039
+Stddev time (ms): 0.433
+===================================
+
+./acotsp tests-small/geo-gr96.tsp tests-small/geo-gr96_queen.out QUEEN 10 1 2 0.5 425
+Config: num_blocks: 68, tpb: 96, shmem: 4488
+
+=== Iteration Timing Statistics ===
+Number of iterations: 10
+Min time (ms): 4.145
+Max time (ms): 5.572
+Mean time (ms): 4.290
+Stddev time (ms): 0.427
+===================================
