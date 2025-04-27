@@ -19,19 +19,19 @@ __global__ void tourConstructionKernelWorker(
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
     // ensure that memory is float-aligned
-    extern __shared__ char shared[];
+    extern __shared__ float shared[];
     int float_section_size = num_cities * sizeof(float);  // selection_probs
-    int int_section_size   = num_cities * sizeof(int);    // ant_tour
     // ant_visited; round up to multiple of 4
     int bool_section_size_aligned = ((sizeof(float) + num_cities * sizeof(bool) - 1) / sizeof(float)) * sizeof(float);
-    int thread_memory_size = (num_cities * sizeof(float)) + (num_cities * sizeof(int)) + bool_section_size_aligned;
+    int thread_memory_size = float_section_size + bool_section_size_aligned;
     char *my_mem = (char*)shared + threadIdx.x * thread_memory_size;
 
     float *selection_probs = (float*)my_mem;
-    int *ant_tour = (int*)((char*)my_mem + float_section_size);
-    bool *ant_visited = (bool*)((char*)my_mem + float_section_size + int_section_size);
-
+    bool *ant_visited = (bool*)((char*)my_mem + float_section_size);
+    
     for (int ant_idx=tid; ant_idx < num_ants; ant_idx += gridDim.x * blockDim.x) {
+        int *ant_tour = &d_ant_tours[ant_idx * num_cities];
+
         for (int j = 0; j < num_cities; ++j) ant_visited[j] = false;
 
         int current_city = ant_idx % num_cities;
@@ -73,9 +73,9 @@ __global__ void tourConstructionKernelWorker(
             current_city = next_city;
         }
 
-        for (int j=0; j < num_cities; ++j) {
-            d_ant_tours[ant_idx * num_cities + j] = ant_tour[j];
-        }
+        // for (int j=0; j < num_cities; ++j) {
+        //     d_ant_tours[ant_idx * num_cities + j] = ant_tour[j];
+        // }
 
         d_rand_state[ant_idx] = local_state;
     }
@@ -91,7 +91,7 @@ TspResult solveTSPWorker(
     unsigned int seed
 ) {
     int num_cities = tsp_input.dimension;
-    int num_ants = num_cities;
+    int num_ants = 128;
 
     int value;
     cudaDeviceGetAttribute(&value, cudaDevAttrMaxSharedMemoryPerBlock, 0);
@@ -103,8 +103,10 @@ TspResult solveTSPWorker(
     int num_blocks = 68; // rtx 2080ti has 68 SMs
     // int threads_per_block = (68 + num_ants - 1) / 68;
     
+    int float_section_size = num_cities * sizeof(float);  // selection_probs
+    // ant_visited; round up to multiple of 4
     int bool_section_size_aligned = ((sizeof(float) + num_cities * sizeof(bool) - 1) / sizeof(float)) * sizeof(float);
-    int thread_memory_size = (num_cities * sizeof(float)) + (num_cities * sizeof(int)) + bool_section_size_aligned;
+    int thread_memory_size = float_section_size + bool_section_size_aligned;
     
     // 4: number of units on a single SM of RTX 2080 Ti
     assert(thread_memory_size < max_shmem_per_block / 4);

@@ -184,3 +184,38 @@ Stddev time (ms): 0.452
 ===================================
 
 
+
+Optimization: Shared memory! 97524b2a5c05a66050dbd5d0d209b82b62b1c21f
+./acotsp tests/euc2d-pr1002.tsp tests/euc2d-pr1002_worker.out WORKER 10 1 2 0.5 425
+Config: num_blocks: 68, tpb: 5, shmem: 45100
+
+=== Iteration Timing Statistics ===
+Number of iterations: 10
+Min time (ms): 5905.676
+Max time (ms): 5923.601
+Mean time (ms): 5915.279
+Stddev time (ms): 5.292
+===================================
+
+./acotsp tests/euc2d-d1291.tsp tests/euc2d-d1291_worker.out WORKER 10 1 2 0.5 425
+Config: num_blocks: 68, tpb: 4, shmem: 46480
+
+=== Iteration Timing Statistics ===
+Number of iterations: 10
+Min time (ms): 15738.025
+Max time (ms): 15777.659
+Mean time (ms): 15762.213
+Stddev time (ms): 9.798
+===================================
+
+./acotsp tests/geo-gr96.tsp tests/geo-gr96_worker.out WORKER 10 1 2 0.5 425
+Config: num_blocks: 68, tpb: 56, shmem: 48384
+
+=== Iteration Timing Statistics ===
+Number of iterations: 10
+Min time (ms): 22.190
+Max time (ms): 22.415
+Mean time (ms): 22.345
+Stddev time (ms): 0.068
+===================================
+
