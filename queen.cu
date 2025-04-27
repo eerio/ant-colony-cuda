@@ -106,10 +106,11 @@ TspResult solveTSPQueen(
     unsigned int seed
 ) {
     int num_cities = tsp_input.dimension;
-    int num_queens = 10;
+    int num_queens = 68;
     int num_workers = num_cities;
     assert(num_cities >= num_workers);
     assert(num_cities / num_workers <= 32);
+    assert(num_cities <= 1024);
 
     int value;
     cudaDeviceGetAttribute(&value, cudaDevAttrMaxSharedMemoryPerBlock, 0);

@@ -1,0 +1,179 @@
+rm tests-small/*_queen.out; TMPDIR=build srun --partition=common --time 10 --nodelist=asusgpu6 --gres=gpu:rtx2080ti -- make run_queen_parallel
+make[1]: Entering directory '/home/balawender/ant-colony-cuda'
+./acotsp tests-small/ceil2d-dsj1000.tsp tests-small/ceil2d-dsj1000_queen.out QUEEN 50 1 2 0.5 425
+Config: num_blocks: 68, tpb: 1000, shmem: 8004
+
+=== Iteration Timing Statistics ===
+Number of iterations: 50
+Min time (ms): 1029.569
+Max time (ms): 1046.661
+Mean time (ms): 1041.798
+Stddev time (ms): 6.185
+===================================
+
+./acotsp tests-small/euc2d-a280.tsp tests-small/euc2d-a280_queen.out QUEEN 50 1 2 0.5 425
+Config: num_blocks: 68, tpb: 280, shmem: 2244
+
+=== Iteration Timing Statistics ===
+Number of iterations: 50
+Min time (ms): 81.154
+Max time (ms): 86.081
+Mean time (ms): 82.480
+Stddev time (ms): 0.992
+===================================
+
+./acotsp tests-small/euc2d-berlin52.tsp tests-small/euc2d-berlin52_queen.out QUEEN 50 1 2 0.5 425
+Config: num_blocks: 68, tpb: 52, shmem: 420
+
+=== Iteration Timing Statistics ===
+Number of iterations: 50
+Min time (ms): 3.331
+Max time (ms): 3.475
+Mean time (ms): 3.343
+Stddev time (ms): 0.020
+===================================
+
+./acotsp tests-small/euc2d-d198.tsp tests-small/euc2d-d198_queen.out QUEEN 50 1 2 0.5 425
+Config: num_blocks: 68, tpb: 198, shmem: 1588
+
+=== Iteration Timing Statistics ===
+Number of iterations: 50
+Min time (ms): 41.058
+Max time (ms): 42.271
+Mean time (ms): 41.750
+Stddev time (ms): 0.387
+===================================
+
+./acotsp tests-small/euc2d-d657.tsp tests-small/euc2d-d657_queen.out QUEEN 50 1 2 0.5 425
+Config: num_blocks: 68, tpb: 657, shmem: 5260
+
+=== Iteration Timing Statistics ===
+Number of iterations: 50
+Min time (ms): 436.632
+Max time (ms): 447.697
+Mean time (ms): 441.086
+Stddev time (ms): 2.902
+===================================
+
+./acotsp tests-small/euc2d-eil51.tsp tests-small/euc2d-eil51_queen.out QUEEN 50 1 2 0.5 425
+Config: num_blocks: 68, tpb: 51, shmem: 412
+
+=== Iteration Timing Statistics ===
+Number of iterations: 50
+Min time (ms): 3.230
+Max time (ms): 3.496
+Mean time (ms): 3.270
+Stddev time (ms): 0.062
+===================================
+
+./acotsp tests-small/euc2d-lin318.tsp tests-small/euc2d-lin318_queen.out QUEEN 50 1 2 0.5 425
+Config: num_blocks: 68, tpb: 318, shmem: 2548
+
+=== Iteration Timing Statistics ===
+Number of iterations: 50
+Min time (ms): 104.100
+Max time (ms): 106.865
+Mean time (ms): 105.716
+Stddev time (ms): 1.003
+===================================
+
+./acotsp tests-small/euc2d-pcb442.tsp tests-small/euc2d-pcb442_queen.out QUEEN 50 1 2 0.5 425
+Config: num_blocks: 68, tpb: 442, shmem: 3540
+
+=== Iteration Timing Statistics ===
+Number of iterations: 50
+Min time (ms): 198.973
+Max time (ms): 202.727
+Mean time (ms): 201.167
+Stddev time (ms): 1.450
+===================================
+
+./acotsp tests-small/euc2d-pr1002.tsp tests-small/euc2d-pr1002_queen.out QUEEN 50 1 2 0.5 425
+Config: num_blocks: 68, tpb: 1002, shmem: 8020
+
+=== Iteration Timing Statistics ===
+Number of iterations: 50
+Min time (ms): 1033.266
+Max time (ms): 1050.916
+Mean time (ms): 1044.471
+Stddev time (ms): 6.892
+===================================
+
+./acotsp tests-small/euc2d-rat783.tsp tests-small/euc2d-rat783_queen.out QUEEN 50 1 2 0.5 425
+Config: num_blocks: 68, tpb: 783, shmem: 6268
+
+=== Iteration Timing Statistics ===
+Number of iterations: 50
+Min time (ms): 619.071
+Max time (ms): 630.367
+Mean time (ms): 624.580
+Stddev time (ms): 4.142
+===================================
+
+./acotsp tests-small/geo-ali535.tsp tests-small/geo-ali535_queen.out QUEEN 50 1 2 0.5 425
+Config: num_blocks: 68, tpb: 535, shmem: 4284
+
+=== Iteration Timing Statistics ===
+Number of iterations: 50
+Min time (ms): 290.515
+Max time (ms): 295.413
+Mean time (ms): 293.511
+Stddev time (ms): 1.850
+===================================
+
+./acotsp tests-small/geo-burma14.tsp tests-small/geo-burma14_queen.out QUEEN 50 1 2 0.5 425
+Config: num_blocks: 68, tpb: 14, shmem: 116
+
+=== Iteration Timing Statistics ===
+Number of iterations: 50
+Min time (ms): 0.380
+Max time (ms): 0.514
+Mean time (ms): 0.384
+Stddev time (ms): 0.019
+===================================
+
+./acotsp tests-small/geo-gr431.tsp tests-small/geo-gr431_queen.out QUEEN 50 1 2 0.5 425
+Config: num_blocks: 68, tpb: 431, shmem: 3452
+
+=== Iteration Timing Statistics ===
+Number of iterations: 50
+Min time (ms): 189.358
+Max time (ms): 195.768
+Mean time (ms): 191.622
+Stddev time (ms): 1.435
+===================================
+
+./acotsp tests-small/geo-gr96.tsp tests-small/geo-gr96_queen.out QUEEN 50 1 2 0.5 425
+Config: num_blocks: 68, tpb: 96, shmem: 772
+
+=== Iteration Timing Statistics ===
+Number of iterations: 50
+Min time (ms): 10.270
+Max time (ms): 10.918
+Mean time (ms): 10.384
+Stddev time (ms): 0.133
+===================================
+
+./acotsp tests-small/geo-ulysses16.tsp tests-small/geo-ulysses16_queen.out QUEEN 50 1 2 0.5 425
+Config: num_blocks: 68, tpb: 16, shmem: 132
+
+=== Iteration Timing Statistics ===
+Number of iterations: 50
+Min time (ms): 0.462
+Max time (ms): 0.596
+Mean time (ms): 0.466
+Stddev time (ms): 0.019
+===================================
+
+./acotsp tests-small/geo-ulysses22.tsp tests-small/geo-ulysses22_queen.out QUEEN 50 1 2 0.5 425
+Config: num_blocks: 68, tpb: 22, shmem: 180
+
+=== Iteration Timing Statistics ===
+Number of iterations: 50
+Min time (ms): 0.761
+Max time (ms): 0.897
+Mean time (ms): 0.765
+Stddev time (ms): 0.019
+===================================
+
+make[1]: Leaving directory '/home/balawender/ant-colony-cuda'

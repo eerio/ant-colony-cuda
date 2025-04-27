@@ -3,8 +3,7 @@ NVCC = /usr/local/cuda/bin/nvcc
 # NVCCFLAGS = -O3 -Iinclude -G -g -DMAX_SHMEM_SIZE=24576 # For Titan V (compute capability 7.0)
 NVCCFLAGS = -O3 -Iinclude -G -g # For Titan V (compute capability 7.0)
 
-TSP_FILES=$(wildcard tests/*.tsp)
-GEO_TSP_FILES=$(wildcard tests/geo-*.tsp)
+TSP_FILES=$(wildcard tests-small/*.tsp)
 
 all: acotsp
 
@@ -54,17 +53,18 @@ test: test/balawender/acotsp
 # 	. .venv/bin/activate && python tsp_ortools.py $< > $@
 
 run_baseline_parallel: acotsp $(TSP_FILES:.tsp=_baseline.out)
-tests/%_baseline.out: tests/%.tsp
+tests-small/%_baseline.out: tests/%.tsp
 	./acotsp $< $@ BASELINE 5 10 2 0.5 42
 
-# run_worker_parallel: acotsp pr1002 euc2d-$(TSP_FILES:.tsp=_worker.out)
-run_worker_parallel: acotsp tests/euc2d-pr1002_worker.out tests/euc2d-d1291_worker.out tests/geo-gr96_worker.out
-tests/%_worker.out: tests/%.tsp
+run_worker_parallel: acotsp $(TSP_FILES:.tsp=_worker.out)
+# run_worker_parallel: acotsp tests/euc2d-pr1002_worker.out tests/euc2d-d1291_worker.out tests/geo-gr96_worker.out
+tests-small/%_worker.out: tests-small/%.tsp
 	./acotsp $< $@ WORKER 10 1 2 0.5 425
 
-run_queen_parallel: acotsp tests/euc2d-pr1002_queen.out tests/euc2d-d657_queen.out tests/geo-gr96_queen.out
-tests/%_queen.out: tests/%.tsp
-	./acotsp $< $@ QUEEN 10 1 2 0.5 425
+# run_queen_parallel: acotsp tests/euc2d-pr1002_queen.out tests/euc2d-d657_queen.out tests/geo-gr96_queen.out
+run_queen_parallel: acotsp $(TSP_FILES:.tsp=_queen.out)
+tests-small/%_queen.out: tests-small/%.tsp
+	./acotsp $< $@ QUEEN 50 1 2 0.5 425
 
 TSPLIB_SOLUTIONS = tsplib/solutions
 
@@ -80,10 +80,10 @@ tests/%_tsplibsolution.out: tests/%.tsp $(TSPLIB_SOLUTIONS)
 all-tsplib-solutions: $(patsubst tests/%.tsp, tests/%_tsplibsolution.out, $(TSP_FILES))
 
 rerun_worker:
-	rm tests/*_worker.out; TMPDIR=build srun --partition=common --time 10 --nodelist=asusgpu6 --gres=gpu:rtx2080ti -- make run_worker_parallel
+	rm tests-small/*_worker.out; TMPDIR=build srun --partition=common --time 10 --nodelist=asusgpu6 --gres=gpu:rtx2080ti -- make run_worker_parallel
 
 rerun_queen:
-	rm tests/*_queen.out; TMPDIR=build srun --partition=common --time 10 --nodelist=asusgpu6 --gres=gpu:rtx2080ti -- make run_queen_parallel
+	rm tests-small/*_queen.out; TMPDIR=build srun --partition=common --time 10 --nodelist=asusgpu6 --gres=gpu:rtx2080ti -- make run_queen_parallel
 
 check_worker:
 	python3 check_results_worker.py

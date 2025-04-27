@@ -4,4 +4,7 @@ balawender.zip
 acotsp
 out.txt
 .venv/*
+
+*.out
 .ipynb_checkpoints
+*.ncu-rep

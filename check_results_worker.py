@@ -34,10 +34,8 @@ def read_cost_and_tour(filepath):
 def main():
     num_bad = 0
     ok = True
-    for root, dirs, files in os.walk('tests'):
+    for root, dirs, files in os.walk('tests-small'):
         for file in files:
-            if 'geo-gr96' not in file and 'euc2d-d1291' not in file and 'euc2d-pr1002' not in file:
-                continue
             if file.endswith('_worker.out'):
                 worker_path = os.path.join(root, file)
                 tsplib_path = worker_path.replace('_worker.out', '_tsplibsolution.out')
@@ -68,7 +66,7 @@ def main():
                         ok = False
                         sys.exit(1)
 
-                    k = 5
+                    k = 1.5
                     if worker_cost > k * tsplib_cost:
                         print(f"  WARNING: Worker cost {worker_cost} more than {k}x TSPLIB cost {tsplib_cost}")
                         # ok = False
