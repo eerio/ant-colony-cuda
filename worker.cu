@@ -4,16 +4,12 @@
 #include <assert.h>
 #include <vector>
 #include <numeric>
+#include <float.h> // For FLT_EPSILON
 #include <algorithm>
 #include <cmath>
 #include "tsp.h"
 
-
-#define PI 3.14159265358979323846
-#define TPB 1024
-#define FLT_MAX (3.4e+38F)
-
-__global__ void tourConstructionKernel(
+__global__ void tourConstructionKernelWorker(
     int* d_ant_tours,
     bool* d_ant_visited,
     float* d_choice_info,
@@ -22,7 +18,7 @@ __global__ void tourConstructionKernel(
     int num_cities,
     curandState* d_rand_state
 ) {
-    int ant_idx = get_idx(num_ants);
+    int ant_idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (ant_idx >= num_ants) return;
     int i = ant_idx;
 
@@ -85,6 +81,7 @@ __global__ void tourConstructionKernel(
     d_rand_state[i] = local_state;
 }
 
+
 TspResult solveTSPWorker(
     const TspInput& tsp_input,
     unsigned int num_iter,
@@ -95,6 +92,13 @@ TspResult solveTSPWorker(
 ) {
     int num_cities = tsp_input.dimension;
     int num_ants = 128;
+    int num_blocks = (MAX_TPB + num_ants - 1) / MAX_TPB;
+    int threads_per_block = MAX_TPB;
+    
+    assert(num_blocks <= MAX_BLOCKS);
+    assert(threads_per_block <= MAX_TPB);
+    assert(num_blocks * threads_per_block >= num_ants);
+
     size_t matrix_size = sizeof(float) * num_cities * num_cities;
     int* d_ant_tours;
     bool* d_ant_visited;
@@ -114,48 +118,18 @@ TspResult solveTSPWorker(
     cudaMalloc(&d_selection_probs, sizeof(float) * num_ants * num_cities);
     cudaMemcpy(d_distances, tsp_input.distances, matrix_size, cudaMemcpyHostToDevice);
 
-    int num_blocks = (num_ants + TPB - 1) / TPB;
-    assert(num_blocks * TPB >= num_ants);
-
-    initialize_rand_states<<<num_blocks, TPB>>>(d_rand_states, num_ants, seed);
-    cudaDeviceSynchronize();
-
-    // Initialize pheromones to 1.0
-    float* h_initial_pheromone = new float[num_cities * num_cities];
-    for (int i = 0; i < num_cities * num_cities; ++i) {
-        h_initial_pheromone[i] = 1.0f;
-    }
-    cudaMemcpy(d_pheromone, h_initial_pheromone, matrix_size, cudaMemcpyHostToDevice);
-    delete[] h_initial_pheromone;
-
-#ifdef DEBUG
-    float* h_choice_info = new float[num_cities * num_cities];
-    for (int i=0; i < num_cities * num_cities; ++i) {
-        h_choice_info[i] = PI;
-    }
-    cudaMemcpy(d_choice_info, h_choice_info, matrix_size, cudaMemcpyHostToDevice);
-    printf("Before: d_choice_info[-1][-2] = %f\n", h_choice_info[num_cities * num_cities - 2]);
-#endif
-    computeChoiceInfoKernel<<<num_blocks, TPB>>>(d_choice_info, d_pheromone, d_distances, num_cities, alpha, beta);
-    cudaDeviceSynchronize();
-#ifdef DEBUG
-    cudaMemcpy(h_choice_info, d_choice_info, matrix_size, cudaMemcpyDeviceToHost);
-    for (int i=0; i < num_cities * num_cities; ++i) {
-        assert(h_choice_info[i] != PI);
-    }
-    printf("After: d_choice_info[-1][-2] = %f\n", h_choice_info[num_cities * num_cities - 2]);
-#endif
-
+    initializeRandStates(d_rand_states, num_ants, seed);
+    initializePheromones(d_pheromone, num_cities);
+    
     std::vector<float> iteration_times_ms;
     cudaEvent_t iter_start, iter_end;
     HANDLE_ERROR(cudaEventCreate(&iter_start));
     HANDLE_ERROR(cudaEventCreate(&iter_end));
     for (unsigned int iter = 0; iter < num_iter; ++iter) {
         HANDLE_ERROR(cudaEventRecord(iter_start));
-        computeChoiceInfoKernel<<<num_blocks, TPB>>>(d_choice_info, d_pheromone, d_distances, num_cities, alpha, beta);
-        cudaDeviceSynchronize();
+        computeChoiceInfo(d_choice_info, d_pheromone, d_distances, num_cities, alpha, beta);
 
-        tourConstructionKernel<<<num_blocks, TPB>>>(
+        tourConstructionKernelWorker<<<num_blocks, threads_per_block>>>(
             d_ant_tours, d_ant_visited, d_choice_info, d_selection_probs, num_ants, num_cities, d_rand_states
         );
         cudaDeviceSynchronize();
@@ -168,18 +142,16 @@ TspResult solveTSPWorker(
         delete[] h_ant_tours;
 #endif
 
-        evaporatePheromoneKernel<<<num_blocks, TPB>>>(d_pheromone, evaporate, num_cities);
-        cudaDeviceSynchronize();
+        evaporatePheromone(d_pheromone, evaporate, num_cities);
 
-        computeTourLengthsKernel<<<num_blocks, TPB>>>(
+        computeTourLengths(
             d_ant_tours, d_distances, d_tour_lengths, num_ants, num_cities
         );
-        cudaDeviceSynchronize();
 
-        depositPheromoneKernel<<<num_blocks, TPB>>>(
-            d_pheromone, d_ant_tours, d_tour_lengths, num_ants, num_cities, 1.0 // TODO: what value Q here?
+        depositPheromone(
+            d_pheromone, d_ant_tours, d_tour_lengths, num_ants, num_cities
         );
-        cudaDeviceSynchronize();
+
         HANDLE_ERROR(cudaEventRecord(iter_end));
         HANDLE_ERROR(cudaEventSynchronize(iter_end));
         float elapsed_ms = 0.0f;

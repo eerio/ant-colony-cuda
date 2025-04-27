@@ -3,6 +3,9 @@
 #include <stdio.h>
 #include <cuda_runtime.h>
 
+#define MAX_BLOCKS 1024
+#define MAX_TPB 1024
+
 #define HANDLE_ERROR(err) (HandleError(err, __FILE__, __LINE__))
 
 inline void HandleError(cudaError_t err, const char* file, int line) {
@@ -33,20 +36,21 @@ struct TspResult {
 }
 
 
-extern __device__ int get_idx(int num_ants);
-extern __global__ void initialize_rand_states(curandState* rand_states, int num_ants, unsigned long seed);
-extern __global__ void depositPheromoneKernel(
+void initializeRandStates(curandState* rand_states, int num_ants, unsigned long seed);
+
+void depositPheromone(
     float* d_pheromone,
     const int* d_ant_tours,
     const float* d_tour_lengths,
     int num_ants,
-    int num_cities,
-    float Q
+    int num_cities
 );
 
-extern __global__ void evaporatePheromoneKernel(float* d_pheromone, float evaporation_rate, int num_cities);
+void evaporatePheromone(float* d_pheromone, float evaporation_rate, int num_cities);
+
 void verifyToursHost(const int* h_ant_tours, int num_ants, int num_cities);
-extern __global__ void computeTourLengthsKernel(
+
+void computeTourLengths(
     const int* d_ant_tours,
     const float* d_distances,
     float* d_tour_lengths,
@@ -54,7 +58,9 @@ extern __global__ void computeTourLengthsKernel(
     int num_cities
 );
 
-extern __global__ void computeChoiceInfoKernel(
+void initializePheromones(float* d_pheromone, int num_cities);
+
+void computeChoiceInfo(
     float* d_choice_info,
     const float* d_pheromone,
     const float* d_distances,

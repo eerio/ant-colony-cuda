@@ -1,9 +1,13 @@
 #include <stdio.h>
-#include <cuda_runtime.h>
 #include <curand_kernel.h>
+#include <cuda_runtime.h>
+#include <assert.h>
+#include <vector>
+#include <numeric>
 #include <float.h> // For FLT_EPSILON
+#include <algorithm>
+#include <cmath>
 #include "tsp.h"
-#define TPB 1024
 
 // #include <cuda_runtime.h>
 // #include <curand_kernel.h>
@@ -11,7 +15,7 @@
 // #include <stdio.h> // Uncomment for printf debugging
 
 // Enable printf from device: Compile with e.g. -arch=sm_70 -rdc=true, link with -lcudadevrt
-#define KERNEL_DEBUG
+// #define KERNEL_DEBUG
 
 // Inclusive prefix sum (scan) - Assumed correct from previous step
 __device__ void prefixSumInclusiveArbitraryN(volatile float* sdata, unsigned int tid, unsigned int N) {
@@ -231,7 +235,6 @@ __global__ void tourConstructionKernelQueen(
     }
 }
 
-
 TspResult solveTSPQueen(
     const TspInput& tsp_input,
     unsigned int num_iter,
@@ -241,7 +244,15 @@ TspResult solveTSPQueen(
     unsigned int seed
 ) {
     int num_cities = tsp_input.dimension;
-    int num_ants = 128;
+    int num_ants = num_cities;
+    // One queen = one block; one city per thread
+    int num_blocks = num_ants; 
+    int threads_per_block = num_cities;
+
+    assert(num_blocks <= MAX_BLOCKS);
+    assert(threads_per_block <= MAX_TPB);
+    assert(num_blocks * threads_per_block >= num_ants);
+    
     size_t matrix_size = sizeof(float) * num_cities * num_cities;
     int* d_ant_tours;
     bool* d_ant_visited;
@@ -251,7 +262,6 @@ TspResult solveTSPQueen(
     float* d_distances;
     float* d_selection_probs;
     float* d_pheromone;
-
     cudaMalloc(&d_pheromone, matrix_size);
     cudaMalloc(&d_ant_tours, sizeof(int) * num_ants * num_cities);
     cudaMalloc(&d_ant_visited, sizeof(bool) * num_ants * num_cities);
@@ -260,48 +270,50 @@ TspResult solveTSPQueen(
     cudaMalloc(&d_choice_info, matrix_size);
     cudaMalloc(&d_distances, matrix_size);
     cudaMalloc(&d_selection_probs, sizeof(float) * num_ants * num_cities);
-
     cudaMemcpy(d_distances, tsp_input.distances, matrix_size, cudaMemcpyHostToDevice);
 
-    int num_blocks = num_ants; // One queen = one block
-    int threads_per_block = num_cities; // One thread per city ideally
-
-    initialize_rand_states<<<(num_ants + TPB - 1) / TPB, TPB>>>(d_rand_states, num_ants, seed);
-    cudaDeviceSynchronize();
-
-    float* h_initial_pheromone = new float[num_cities * num_cities];
-    for (int i = 0; i < num_cities * num_cities; ++i) {
-        h_initial_pheromone[i] = 1.0f;
-    }
-    cudaMemcpy(d_pheromone, h_initial_pheromone, matrix_size, cudaMemcpyHostToDevice);
-    delete[] h_initial_pheromone;
-
-    computeChoiceInfoKernel<<<(num_cities * num_cities + TPB - 1) / TPB, TPB>>>(d_choice_info, d_pheromone, d_distances, num_cities, alpha, beta);
-    cudaDeviceSynchronize();
-
+    initializeRandStates(d_rand_states, num_ants, seed);
+    initializePheromones(d_pheromone, num_cities);
+    
+    std::vector<float> iteration_times_ms;
+    cudaEvent_t iter_start, iter_end;
+    HANDLE_ERROR(cudaEventCreate(&iter_start));
+    HANDLE_ERROR(cudaEventCreate(&iter_end));
     for (unsigned int iter = 0; iter < num_iter; ++iter) {
-        computeChoiceInfoKernel<<<(num_cities * num_cities + TPB - 1) / TPB, TPB>>>(d_choice_info, d_pheromone, d_distances, num_cities, alpha, beta);
-        cudaDeviceSynchronize();
+        HANDLE_ERROR(cudaEventRecord(iter_start));
+        computeChoiceInfo(d_choice_info, d_pheromone, d_distances, num_cities, alpha, beta);
 
-        size_t shared_mem_size = sizeof(float) * num_cities + sizeof(int) * num_cities + sizeof(int);
-        tourConstructionKernelQueen<<<num_blocks, threads_per_block, shared_mem_size>>>(
+        tourConstructionKernelQueen<<<num_blocks, threads_per_block>>>(
             d_ant_tours, d_ant_visited, d_choice_info, d_selection_probs, num_ants, num_cities, d_rand_states
         );
         cudaDeviceSynchronize();
 
-        evaporatePheromoneKernel<<<(num_cities * num_cities + TPB - 1) / TPB, TPB>>>(d_pheromone, evaporate, num_cities);
+#ifdef DEBUG
+        int* h_ant_tours = new int[num_ants * num_cities];
+        cudaMemcpy(h_ant_tours, d_ant_tours, sizeof(int) * num_ants * num_cities, cudaMemcpyDeviceToHost);
         cudaDeviceSynchronize();
+        verifyToursHost(h_ant_tours, num_ants, num_cities);
+        delete[] h_ant_tours;
+#endif
 
-        computeTourLengthsKernel<<<(num_ants + TPB - 1) / TPB, TPB>>>(
+        evaporatePheromone(d_pheromone, evaporate, num_cities);
+
+        computeTourLengths(
             d_ant_tours, d_distances, d_tour_lengths, num_ants, num_cities
         );
-        cudaDeviceSynchronize();
 
-        depositPheromoneKernel<<<(num_ants + TPB - 1) / TPB, TPB>>>(
-            d_pheromone, d_ant_tours, d_tour_lengths, num_ants, num_cities, 1.0
+        depositPheromone(
+            d_pheromone, d_ant_tours, d_tour_lengths, num_ants, num_cities
         );
-        cudaDeviceSynchronize();
+
+        HANDLE_ERROR(cudaEventRecord(iter_end));
+        HANDLE_ERROR(cudaEventSynchronize(iter_end));
+        float elapsed_ms = 0.0f;
+        HANDLE_ERROR(cudaEventElapsedTime(&elapsed_ms, iter_start, iter_end));
+        iteration_times_ms.push_back(elapsed_ms);
     }
+    HANDLE_ERROR(cudaEventDestroy(iter_start));
+    HANDLE_ERROR(cudaEventDestroy(iter_end));
 
     float* h_tour_lengths = new float[num_ants];
     cudaMemcpy(h_tour_lengths, d_tour_lengths, sizeof(float) * num_ants, cudaMemcpyDeviceToHost);
@@ -338,6 +350,27 @@ TspResult solveTSPQueen(
     cudaFree(d_choice_info);
     cudaFree(d_distances);
     cudaFree(d_selection_probs);
+
+    float sum = std::accumulate(iteration_times_ms.begin(), iteration_times_ms.end(), 0.0f);
+    float mean = sum / iteration_times_ms.size();
+
+    float sq_sum = std::inner_product(
+        iteration_times_ms.begin(), iteration_times_ms.end(),
+        iteration_times_ms.begin(), 0.0f
+    );
+    float stddev = std::sqrt(sq_sum / iteration_times_ms.size() - mean * mean);
+
+    auto [min_it, max_it] = std::minmax_element(iteration_times_ms.begin(), iteration_times_ms.end());
+    float min_time = *min_it;
+    float max_time = *max_it;
+
+    printf("\n=== Iteration Timing Statistics ===\n");
+    printf("Number of iterations: %lu\n", iteration_times_ms.size());
+    printf("Min time (ms): %.3f\n", min_time);
+    printf("Max time (ms): %.3f\n", max_time);
+    printf("Mean time (ms): %.3f\n", mean);
+    printf("Stddev time (ms): %.3f\n", stddev);
+    printf("===================================\n\n");
 
     return result;
 }

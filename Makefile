@@ -1,6 +1,6 @@
 NVCC = /usr/local/cuda/bin/nvcc
 # NVCCFLAGS = -O3 -Iinclude -DDEBUG # For Titan V (compute capability 7.0)
-NVCCFLAGS = -O3 -Iinclude # For Titan V (compute capability 7.0)
+NVCCFLAGS = -O3 -Iinclude -G -g# For Titan V (compute capability 7.0)
 
 TSP_FILES=$(wildcard tests/*.tsp)
 GEO_TSP_FILES=$(wildcard tests/geo-*.tsp)
@@ -62,7 +62,7 @@ tests/%_worker.out: tests/%.tsp
 
 run_queen_parallel: acotsp $(TSP_FILES:.tsp=_queen.out)
 tests/%_queen.out: tests/%.tsp
-	./acotsp $< $@ QUEEN 1000 1 2 0.5 425
+	./acotsp $< $@ QUEEN 10 1 2 0.5 425
 
 TSPLIB_SOLUTIONS = tsplib/solutions
 
@@ -83,7 +83,10 @@ rerun_worker:
 rerun_queen:
 	rm tests/*_queen.out; srun --partition=common --time 10 --gres=gpu -- make run_queen_parallel
 
-check_results:
+check_worker:
+	python3 check_results_worker.py
+
+check_queen:
 	python3 check_results_queen.py
 
 .PHONY: all clean pack test ortools
