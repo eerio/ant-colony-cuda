@@ -45,11 +45,17 @@ __global__ void tourConstructionKernelWorker(
             // float* selection_probs = &d_selection_probs[i * num_cities];
 
             for (int j = 0; j < num_cities; ++j) {
-                if (!ant_visited[j]) {
+                // if (!ant_visited[j]) {
                     int idx = current_city * num_cities + j;
                     selection_probs[j] = d_choice_info[idx];
                     sum_probs += selection_probs[j];
-                } else {
+                // } else {
+                //     selection_probs[j] = 0.0f;
+                // }
+            }
+            for (int j=0; j < num_cities; ++j) {
+                if (ant_visited[j]) {
+                    sum_probs -= selection_probs[j];
                     selection_probs[j] = 0.0f;
                 }
             }
@@ -59,13 +65,13 @@ __global__ void tourConstructionKernelWorker(
             int next_city = -1;
 
             for (int j = 0; j < num_cities; ++j) {
-                if (selection_probs[j] > 0.0f && !ant_visited[j]) {
+                // if (selection_probs[j] > 0.0f && !ant_visited[j]) {
                     accumulated_prob += selection_probs[j];
                     if (accumulated_prob >= r) {
                         next_city = j;
                         break;
                     }
-                }
+                // }
             }
 
             ant_tour[step] = next_city;
@@ -91,7 +97,7 @@ TspResult solveTSPWorker(
     unsigned int seed
 ) {
     int num_cities = tsp_input.dimension;
-    int num_ants = 128;
+    int num_ants = num_cities;
 
     int value;
     cudaDeviceGetAttribute(&value, cudaDevAttrMaxSharedMemoryPerBlock, 0);
@@ -100,7 +106,6 @@ TspResult solveTSPWorker(
     // optimization: assign threads uniformly to blocks
     // int num_blocks = (MAX_TPB + num_ants - 1) / MAX_TPB;
     // int threads_per_block = MAX_TPB;
-    int num_blocks = 68; // rtx 2080ti has 68 SMs
     // int threads_per_block = (68 + num_ants - 1) / 68;
     
     int float_section_size = num_cities * sizeof(float);  // selection_probs
@@ -112,6 +117,7 @@ TspResult solveTSPWorker(
     assert(thread_memory_size < max_shmem_per_block / 4);
     int threads_per_block = max_shmem_per_block / thread_memory_size;
     int shared_memory_size = thread_memory_size * threads_per_block; // per block!
+    int num_blocks = (threads_per_block + num_ants - 1) / threads_per_block; // rtx 2080ti has 68 SMs
 
     cudaDeviceGetAttribute(&value, cudaDevAttrMaxThreadsPerBlock, 0);
     assert(threads_per_block > 0);

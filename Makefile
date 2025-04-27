@@ -60,7 +60,7 @@ tests/%_baseline.out: tests/%.tsp
 # run_worker_parallel: acotsp pr1002 euc2d-$(TSP_FILES:.tsp=_worker.out)
 run_worker_parallel: acotsp tests/euc2d-pr1002_worker.out tests/euc2d-d1291_worker.out tests/geo-gr96_worker.out
 tests/%_worker.out: tests/%.tsp
-	./acotsp $< $@ WORKER 10 1 2 0.5 425
+	./acotsp $< $@ WORKER 4 1 2 0.5 425
 
 run_queen_parallel: acotsp tests/euc2d-pr1002_queen.out tests/euc2d-d1291_queen.out tests/geo-gr96_queen.out
 tests/%_queen.out: tests/%.tsp
