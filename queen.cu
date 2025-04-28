@@ -4,54 +4,41 @@
 #include <assert.h>
 #include <vector>
 #include <numeric>
-#include <float.h> // For FLT_EPSILON
+#include <float.h>
 #include <algorithm>
 #include <cmath>
 #include "tsp.h"
-
+#include <cub/cub.cuh>
 
 #define MAX_CITIES 1024
+#define N_THREADS 1024
 
-// this stores 0 in temp[0], stores sum(temp[0..n-2]) in temp[n-1], destroys temp[n-1]
-// it assumes that n is a power of two!!!!!!
-// https://users.umiacs.umd.edu/~ramanid/cmsc828e_gpusci/ScanTalk.pdf
-__device__ void prescan(float *temp, int n)
-{
-    int thid = threadIdx.x;
-    int offset = 1;
+using BlockLoadT = cub::BlockLoad<float, N_THREADS, (N_THREADS + MAX_CITIES - 1) / N_THREADS>;
+ 
+using BlockScanT = cub::BlockScan<float, N_THREADS>;
+ 
 
-    for (int d = n >> 1; d > 0; d >>= 1) // build sum in place up the tree
-    {
-        __syncthreads();
+using BlockReduceT = cub::BlockReduce<float, N_THREADS>;
+ 
+typedef union {
+ 
+    typename BlockLoadT::TempStorage load;
+ 
+    typename BlockScanT::TempStorage scan;
+ 
 
-        if (thid < d)
-        {
-            int ai = offset * (2 * thid + 1) - 1;
-            int bi = offset * (2 * thid + 2) - 1;
-            temp[bi] += temp[ai];
-        }
-        offset *= 2;
-    }
-    
-    if (thid == 0) { temp[n - 1] = 0; } // clear the last element
-    
-    for (int d = 1; d < n && offset > 1; d *= 2) // traverse down tree & build scan
-    {
-        offset >>= 1;
-        __syncthreads();
-        
-        if (thid < d)
-        {
-            int ai = offset * (2 * thid + 1) - 1;
-            int bi = offset * (2 * thid + 2) - 1;
-            
-            float t = temp[ai];
-            temp[ai] = temp[bi];
-            temp[bi] += t;
-        }
-    }    
-    // __syncthreads();
-}
+    typename BlockReduceT::TempStorage reduce;
+ 
+} myTempStorageT;
+
+struct Shared {
+    int tabu_list[MAX_CITIES];
+    float row_choice_info[MAX_CITIES];
+    myTempStorageT cubStorage; 
+    float selection_probs[MAX_CITIES + 1]; // + 1 for exclusive scan
+    float total_sum;
+    int selected_city;
+};
 
 __global__ void tourConstructionKernelQueen(
     int *tours,
@@ -60,11 +47,13 @@ __global__ void tourConstructionKernelQueen(
     int num_cities,
     curandState *states
 ) {
-    extern __shared__ float shared_data[]; 
-    float *selection_probs = shared_data;      // Shared memory for selection probs
-    int *tabu_list = (int*)&selection_probs[MAX_CITIES + 1]; // Shared memory for tabu list
-    float *total_sum = (float *)&tabu_list[num_cities];
-    float *row_choice_info = (float *)&total_sum[1];
+    extern __shared__ Shared shared_data[];
+    float *selection_probs = shared_data->selection_probs;
+    int *tabu_list = shared_data->tabu_list;
+    float *total_sum = &shared_data->total_sum;
+    int *selected_city = &shared_data->selected_city;
+    float *row_choice_info = shared_data->row_choice_info;
+    myTempStorageT *cubStorage = &shared_data->cubStorage;
 
     int queen_id = blockIdx.x; // Each block handles one queen ant
     int worker_id = threadIdx.x; // Each thread in block is a worker (city checker)
@@ -95,60 +84,63 @@ __global__ void tourConstructionKernelQueen(
         }
         __syncthreads();
 
-        // Compute selection probabilities
-        for (int city = worker_id; city < MAX_CITIES; city += blockDim.x) {
-            if (city < num_cities) {
-                float prob = tabu_list[city] ? 0.0f : row_choice_info[city];
-                selection_probs[city] = prob;
-            } else {
-                selection_probs[city] = 0;
-            }
+        float threadData[1];
+        if (worker_id < num_cities && !tabu_list[worker_id]) {
+            threadData[0] = row_choice_info[worker_id];
+        } else {
+            threadData[0] = 0;
+        }
+        BlockScanT(cubStorage->scan).InclusiveSum(threadData, threadData);
+        if (worker_id < num_cities) {
+            selection_probs[worker_id] = threadData[0];
         }
         __syncthreads();
-        if (worker_id == 0) { selection_probs[MAX_CITIES] = selection_probs[MAX_CITIES - 1]; }
-        __syncthreads();
-        prescan(selection_probs, MAX_CITIES); // destroys last city, but it's saved already
-        __syncthreads();
-        if (worker_id == 0) {
-            selection_probs[MAX_CITIES] += selection_probs[MAX_CITIES - 1];
-            *total_sum = selection_probs[MAX_CITIES];
+        if (worker_id == 0 ){
+            *total_sum = selection_probs[num_cities - 1];
         }
         __syncthreads();
 
         // Draw random value for roulette selection
-        float rand_val = curand_uniform(&local_state) * *total_sum;
+        float rand_val = curand_uniform(&local_state) * *total_sum - FLT_MIN;
+        assert(selection_probs[num_cities - 1] == *total_sum);
 
         // Perform Roulette Wheel-style selection
-        int selected_city = -1;
         if (worker_id == 0) {
-            *total_sum = -1;
+            *selected_city = MAX_CITIES + 1;
         }
         __syncthreads();
+        float tol = 1e-8;
         if (
-            (worker_id == 0 && selection_probs[1] >= rand_val)
-            || (selection_probs[worker_id + 1] >= rand_val && selection_probs[worker_id] < rand_val)
+            (worker_id == 0 && selection_probs[0] >= rand_val)
+            || (worker_id < num_cities && selection_probs[worker_id] + tol >= rand_val && selection_probs[worker_id - 1] < rand_val)
          ) {
-            // hack; change to another shared variable
-            // if (tabu_list[worker_id]) {
-            //     printf("This is weird! %d %f %f %f %f\n", worker_id, selection_probs[worker_id], selection_probs[worker_id + 1], rand_val, *total_sum);
-            //     assert(false);
-            // }
-            if (!tabu_list[worker_id]) {*total_sum = worker_id;}
+            // here weird stuff can happen; because of floats, node can be tabued
+            // or it can have chance 0 etc.
+            if (!tabu_list[worker_id]) {
+                // *selected_city = worker_id;
+                // this should be accessed by at most a few threads (depending on tol)
+                atomicMin(selected_city, worker_id);
+            }
         }
         __syncthreads();
-        if (worker_id == 0 && (int)*total_sum == -1) {
-            // shouldn't happen
-            for (int city=0; city < num_cities; ++city) { if (!tabu_list[city]) { *total_sum = city; break; }}
+        if (worker_id == 0 && *selected_city == MAX_CITIES + 1) {
+            // shouldn't happen often
+            for (int city=0; city < num_cities; ++city) {
+                if (!tabu_list[city]) {
+                    *selected_city = city;
+                    break;
+                }
+            }
         }
         __syncthreads();
-        selected_city = (int)*total_sum;
-        assert(selected_city >= 0);
-        assert(selected_city < num_cities);
-        assert(!tabu_list[selected_city]);
+
+        assert(*selected_city >= 0);
+        assert(*selected_city < num_cities);
+        assert(!tabu_list[*selected_city]);
 
         if (worker_id == 0) {
-            tours[queen_id * num_cities + step] = selected_city;
-            tabu_list[selected_city] = true;
+            tours[queen_id * num_cities + step] = *selected_city;
+            tabu_list[*selected_city] = true;
         }
         __syncthreads();
     }
@@ -168,60 +160,27 @@ TspResult solveTSPQueen(
     unsigned int seed
 ) {
     int num_cities = tsp_input.dimension;
-    int num_queens = 68;
-    int num_workers = 3;//num_cities;
-    assert(num_cities >= num_workers);
-    assert(num_cities / num_queens <= 32);
-    assert(num_cities <= 1024);
-
-    int value;
-    cudaDeviceGetAttribute(&value, cudaDevAttrMaxSharedMemoryPerBlock, 0);
-    const int max_shmem_per_block = value;
-
-    // optimization: assign threads uniformly to blocks
-    // int num_blocks = (MAX_TPB + num_workers - 1) / MAX_TPB;
-    // int threads_per_block = MAX_TPB;
-    int num_blocks = num_queens; // 68; // rtx 2080ti has 68 SMs
-    // int threads_per_block = (68 + num_workers - 1) / 68;
+    int num_queens = num_cities;
+    int num_workers = MAX_CITIES;
     
-    int float_section_size = (MAX_CITIES + 1) * sizeof(float);  // selection_probs
-    // ant_visited; round up to multiple of 4
-    int int_section_size = num_cities * sizeof(int);
-    int thread_memory_size = float_section_size + int_section_size + sizeof(float) + (num_cities * sizeof(float));
-    
-    // 4: number of units on a single SM of RTX 2080 Ti
-    assert(thread_memory_size < max_shmem_per_block / 4);
-    int threads_per_block = num_workers; // max_shmem_per_block / thread_memory_size;
-    int shared_memory_size = thread_memory_size; // per block!
-
-    cudaDeviceGetAttribute(&value, cudaDevAttrMaxThreadsPerBlock, 0);
-    assert(threads_per_block > 0);
-    assert(threads_per_block <= value);
-    assert(shared_memory_size > 0);
-    assert(shared_memory_size <= max_shmem_per_block);
-    cudaDeviceGetAttribute(&value, cudaDevAttrMaxSharedMemoryPerMultiprocessor, 0);
-    assert(num_blocks / 68 <= 32); // rtx 2080ti: max 32 blocks per SM
-    assert(num_blocks <= MAX_BLOCKS);
-
+    int num_blocks = num_queens; // number of Queens
+    int threads_per_block = num_workers; // number of worker ants
+    int shared_memory_size = sizeof(Shared);
     printf("Config: num_blocks: %d, tpb: %d, shmem: %d\n", num_blocks, threads_per_block, shared_memory_size);
 
     size_t matrix_size = sizeof(float) * num_cities * num_cities;
     int* d_ant_tours;
-    // bool* d_ant_visited;
     curandState* d_rand_states;
     float* d_tour_lengths;
     float* d_choice_info;
     float* d_distances;
-    // float* d_selection_probs;
     float* d_pheromone;
     cudaMalloc(&d_pheromone, matrix_size);
     cudaMalloc(&d_ant_tours, sizeof(int) * num_queens * num_cities);
-    // cudaMalloc(&d_ant_visited, sizeof(bool) * num_queens * num_cities);
     cudaMalloc(&d_rand_states, sizeof(curandState) * num_queens);
     cudaMalloc(&d_tour_lengths, sizeof(float) * num_queens);
     cudaMalloc(&d_choice_info, matrix_size);
     cudaMalloc(&d_distances, matrix_size);
-    // cudaMalloc(&d_selection_probs, sizeof(float) * num_queens * num_cities);
     cudaMemcpy(d_distances, tsp_input.distances, matrix_size, cudaMemcpyHostToDevice);
 
     initializeRandStates(d_rand_states, num_queens, seed);
@@ -239,14 +198,6 @@ TspResult solveTSPQueen(
             d_ant_tours, d_choice_info, num_queens, num_cities, d_rand_states
         );
         cudaDeviceSynchronize();
-
-#ifdef DEBUG
-        int* h_ant_tours = new int[num_queens * num_cities];
-        cudaMemcpy(h_ant_tours, d_ant_tours, sizeof(int) * num_queens * num_cities, cudaMemcpyDeviceToHost);
-        cudaDeviceSynchronize();
-        verifyToursHost(h_ant_tours, num_queens, num_cities);
-        delete[] h_ant_tours;
-#endif
 
         evaporatePheromone(d_pheromone, evaporate, num_cities);
 
@@ -296,12 +247,10 @@ TspResult solveTSPQueen(
 
     cudaFree(d_ant_tours);
     cudaFree(d_pheromone);
-    // cudaFree(d_ant_visited);
     cudaFree(d_rand_states);
     cudaFree(d_tour_lengths);
     cudaFree(d_choice_info);
     cudaFree(d_distances);
-    // cudaFree(d_selection_probs);
 
     float sum = std::accumulate(iteration_times_ms.begin(), iteration_times_ms.end(), 0.0f);
     float mean = sum / iteration_times_ms.size();

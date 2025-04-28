@@ -2,6 +2,7 @@
 #include <curand_kernel.h>
 #include <cuda_runtime.h>
 #include <assert.h>
+#include <float.h>
 #include "tsp.h"
 
 __global__ void initializeRandStatesKernel(curandState* rand_states, int num_ants, unsigned long seed) {
@@ -30,16 +31,16 @@ __global__ void computeChoiceInfoKernel(
     int stride = blockDim.x * gridDim.x;
 
     for (int idx = tid; idx < total; idx += stride) {
-        int row = idx / num_cities;
-        int col = idx % num_cities;
+        
 
-        if (row == col) {
+        float dist = d_distances[idx];
+        float eps = 1e-9;
+        if (dist < eps) {
             d_choice_info[idx] = 0.0f;
         } else {
             float tau = d_pheromone[idx];
-            float dist = d_distances[idx];
-            float eta = (dist > 0.0f) ? 1.0f / dist : 0.0f;
-            d_choice_info[idx] = __powf(tau, alpha) * __powf(eta, beta);
+            float eta = 1.0f / dist;
+            d_choice_info[idx] = fmaxf(FLT_MIN, __powf(tau, alpha) * __powf(eta, beta));
         }
     }
 }

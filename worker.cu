@@ -23,7 +23,7 @@ __global__ void tourConstructionKernelWorker(
     // ensure that memory is float-aligned
     extern __shared__ float shared[];
     float *selection_probs = (float*)shared;
-    bool *ant_visited = (bool*)&selection_probs[MAX_CITIES];
+    int *ant_visited = (int*)&selection_probs[MAX_CITIES];
     
     assert(ant_idx + gridDim.x * blockDim.x >= num_ants);
     int *ant_tour = &d_ant_tours[ant_idx * num_cities];
@@ -38,7 +38,6 @@ __global__ void tourConstructionKernelWorker(
 
     for (int step = 1; step < num_cities; ++step) {
         float sum_probs = 0.0f;
-        // float* selection_probs = &d_selection_probs[i * num_cities];
 
         for (int j = 0; j < num_cities; ++j) {
             if (!ant_visited[j]) {
@@ -95,7 +94,7 @@ TspResult solveTSPWorker(
     int num_blocks = num_ants;
 
     int float_section_size = MAX_CITIES * sizeof(float); 
-    int bool_section_size_aligned = MAX_CITIES;
+    int bool_section_size_aligned = MAX_CITIES * sizeof(int);
     int thread_memory_size = float_section_size + bool_section_size_aligned;
     
     int threads_per_block = 1;
@@ -125,37 +124,62 @@ TspResult solveTSPWorker(
     cudaEvent_t iter_start, iter_end;
     HANDLE_ERROR(cudaEventCreate(&iter_start));
     HANDLE_ERROR(cudaEventCreate(&iter_end));
+
+    // cudaStream_t stream;
+    // std::vector<cudaGraphNode_t> _node_list;
+    // cudaGraphExec_t _graph_exec;
+    // cudaGraphNode_t new_node;
+    // cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
+    // cudaGraph_t _capturing_graph;
+    // cudaStreamCaptureStatus _capture_status;
+    // const cudaGraphNode_t *_deps;
+    // size_t _dep_count;
+    // cudaStreamGetCaptureInfo_v2(stream, &_capture_status, nullptr &_capturing_graph, &_deps, &_dep_count);
+
+    // cudakernelNodeParams _dynamic_params_cuda;
+    // cudaGraphAddKernelNode(&new_node, _capturing_graph, _deps, _dep_count, &_dynamic_params_cuda);
+    // _node_list.push_back(new_node);
+    // cudaStreamUpdateCaptureDependencies(stream, &new_node, 1, 1); 
+    // cudaGraph_t _captured_graph;
+    // cudaStreamEndCapture(stream, &_captured_graph);
+
+    // cudaGraphInstantiate(&_graph_exec, _captured_graph, nullptr, nullptr, 0);
+
+    // // updating
+    // cudakernelNodeParams _dynamic_params_updated_cuda;
+    // cudaGraphExecKernelNodeSetParams(_graph_exec, _node_list[0], &_dynamic_params_updated_cuda);
+
+    bool graphCreated=false;
+    cudaGraph_t graph;
+    cudaGraphExec_t instance;
     for (unsigned int iter = 0; iter < num_iter; ++iter) {
         HANDLE_ERROR(cudaEventRecord(iter_start));
-        computeChoiceInfo(d_choice_info, d_pheromone, d_distances, num_cities, alpha, beta);
+        if (!graphCreated) {
+            cudaStreamBeginCapture(0, cudaStreamCaptureModeGlobal);
+            computeChoiceInfo(d_choice_info, d_pheromone, d_distances, num_cities, alpha, beta);
 
-        tourConstructionKernelWorker<<<num_blocks, threads_per_block, shared_memory_size>>>(
-            d_ant_tours, d_choice_info, num_ants, num_cities, d_rand_states
-        );
-        cudaDeviceSynchronize();
-        cudaError_t err = cudaGetLastError();
-        if (err != cudaSuccess) {
-            printf("CUDA error: %s\n", cudaGetErrorString(err));
-            exit(1);
+            tourConstructionKernelWorker<<<num_blocks, threads_per_block, shared_memory_size>>>(
+                d_ant_tours, d_choice_info, num_ants, num_cities, d_rand_states
+            );
+            cudaDeviceSynchronize();
+            
+            evaporatePheromone(d_pheromone, evaporate, num_cities);
+
+            computeTourLengths(
+                d_ant_tours, d_distances, d_tour_lengths, num_ants, num_cities
+            );
+
+            depositPheromone(
+                d_pheromone, d_ant_tours, d_tour_lengths, num_ants, num_cities
+            );
+            
+            cudaStreamEndCapture(0, &graph);
+            cudaGraphInstantiate(&instance, graph, NULL, NULL, 0);
+            graphCreated = true;
         }
-
-#ifdef DEBUG
-        int* h_ant_tours = new int[num_ants * num_cities];
-        cudaMemcpy(h_ant_tours, d_ant_tours, sizeof(int) * num_ants * num_cities, cudaMemcpyDeviceToHost);
-        cudaDeviceSynchronize();
-        verifyToursHost(h_ant_tours, num_ants, num_cities);
-        delete[] h_ant_tours;
-#endif
-
-        evaporatePheromone(d_pheromone, evaporate, num_cities);
-
-        computeTourLengths(
-            d_ant_tours, d_distances, d_tour_lengths, num_ants, num_cities
-        );
-
-        depositPheromone(
-            d_pheromone, d_ant_tours, d_tour_lengths, num_ants, num_cities
-        );
+        
+        cudaGraphLaunch(instance, 0);
+        cudaStreamSynchronize(0);
 
         HANDLE_ERROR(cudaEventRecord(iter_end));
         HANDLE_ERROR(cudaEventSynchronize(iter_end));
