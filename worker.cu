@@ -91,7 +91,7 @@ TspResult solveTSPWorker(
     unsigned int seed
 ) {
     int num_cities = tsp_input.dimension;
-    int num_ants = 128;
+    int num_ants = num_cities;
 
     int value;
     cudaDeviceGetAttribute(&value, cudaDevAttrMaxSharedMemoryPerBlock, 0);
@@ -100,7 +100,7 @@ TspResult solveTSPWorker(
     // optimization: assign threads uniformly to blocks
     // int num_blocks = (MAX_TPB + num_ants - 1) / MAX_TPB;
     // int threads_per_block = MAX_TPB;
-    int num_blocks = 68; // rtx 2080ti has 68 SMs
+    int num_blocks = num_ants; // rtx 2080ti has 68 SMs
     // int threads_per_block = (68 + num_ants - 1) / 68;
     
     int float_section_size = num_cities * sizeof(float);  // selection_probs
@@ -110,7 +110,7 @@ TspResult solveTSPWorker(
     
     // 4: number of units on a single SM of RTX 2080 Ti
     assert(thread_memory_size < max_shmem_per_block / 4);
-    int threads_per_block = max_shmem_per_block / thread_memory_size;
+    int threads_per_block = 1;  //max_shmem_per_block / thread_memory_size;
     int shared_memory_size = thread_memory_size * threads_per_block; // per block!
 
     cudaDeviceGetAttribute(&value, cudaDevAttrMaxThreadsPerBlock, 0);
