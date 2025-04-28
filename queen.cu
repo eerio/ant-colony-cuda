@@ -56,9 +56,11 @@ __device__ void prescan(float *temp, int n)
     // __syncthreads();
 }
 
-typedef cub::BlockLoad<float, N_THREADS, (N_THREADS + MAX_CITIES - 1) / N_THREADS> BlockLoadT;
+using BlockLoadT = cub::BlockLoad<float, N_THREADS, (N_THREADS + MAX_CITIES - 1) / N_THREADS>;
+using BlockScanT = cub::BlockScan<float, N_THREADS>;
 typedef union {
     typename BlockLoadT::TempStorage load;
+    typename BlockScanT::TempStorage scan;
 } myTempStorageT;
 
 struct Shared {
@@ -135,7 +137,9 @@ __global__ void tourConstructionKernelQueen(
         __syncthreads();
         if (worker_id == 0) { selection_probs[MAX_CITIES] = selection_probs[MAX_CITIES - 1]; }
         __syncthreads();
-        prescan(selection_probs, MAX_CITIES); // destroys last city, but it's saved already
+        // prescan(selection_probs, MAX_CITIES); // destroys last city, but it's saved already
+        threadData[0] = selection_probs[worker_id];
+        BlockScanT(cubStorage->scan).ExclusiveSum(threadData, threadData);
         __syncthreads();
         if (worker_id == 0) {
             selection_probs[MAX_CITIES] += selection_probs[MAX_CITIES - 1];
