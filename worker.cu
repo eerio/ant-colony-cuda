@@ -195,7 +195,7 @@ TspResult solveTSPWorker(
     cudaDeviceSynchronize();
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<float, std::milli> duration_ms = end - start;
-    iteration_times_ms.clear();
+    iteration_times_ms.clear(); 
     iteration_times_ms.push_back(duration_ms.count());
     HANDLE_ERROR(cudaEventDestroy(iter_start));
     HANDLE_ERROR(cudaEventDestroy(iter_end));

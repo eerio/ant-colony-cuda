@@ -31,8 +31,6 @@ __global__ void computeChoiceInfoKernel(
     int stride = blockDim.x * gridDim.x;
 
     for (int idx = tid; idx < total; idx += stride) {
-        
-
         float dist = d_distances[idx];
         float eps = 1e-9;
         if (dist < eps) {

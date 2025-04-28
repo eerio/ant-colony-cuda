@@ -13,7 +13,7 @@ SRUN_FLAGS = --partition=common --time 10 --nodelist=asusgpu5 --gres=gpu:rtx2080
 # SRUN_FLAGS = --partition=common --time 10 --nodelist=asusgpu3 --gres=gpu:titanv
 
 # 100 iters, alpha 1, beta 1.1, rho 0.9, seed 42
-TSP_FLAGS = 50 1 2 0.5 42
+TSP_FLAGS = 1000 1 2 0.5 42
 
 all: acotsp
 

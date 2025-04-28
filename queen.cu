@@ -15,28 +15,20 @@
 #define N_THREADS 1024
 
 using BlockLoadT = cub::BlockLoad<float, N_THREADS, (N_THREADS + MAX_CITIES - 1) / N_THREADS>;
- 
 using BlockScanT = cub::BlockScan<float, N_THREADS>;
- 
-
 using BlockReduceT = cub::BlockReduce<float, N_THREADS>;
  
 typedef union {
- 
     typename BlockLoadT::TempStorage load;
- 
     typename BlockScanT::TempStorage scan;
- 
-
     typename BlockReduceT::TempStorage reduce;
- 
 } myTempStorageT;
 
 struct Shared {
     int tabu_list[MAX_CITIES];
     float row_choice_info[MAX_CITIES];
     myTempStorageT cubStorage; 
-    float selection_probs[MAX_CITIES + 1]; // + 1 for exclusive scan
+    float selection_probs[MAX_CITIES + 1]; // + 1 for exclusive scan    
     float total_sum;
     int selected_city;
 };

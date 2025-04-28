@@ -1,0 +1,179 @@
+rm tests-small/*_worker.out; TMPDIR=build srun --partition=common --time 10 --nodelist=asusgpu5 --gres=gpu:rtx2080ti -- make run_worker_parallel
+make[1]: Entering directory '/home/balawender/ant-colony-cuda'
+./acotsp tests-small/ceil2d-dsj1000.tsp tests-small/ceil2d-dsj1000_worker.out WORKER 1000 1 2 0.5 42
+Config: num_blocks: 1000, tpb: 1, shmem: 8192
+
+=== Iteration Timing Statistics ===
+Number of iterations: 1
+Min time (ms): 170.758
+Max time (ms): 170.758
+Mean time (ms): 170.758
+Stddev time (ms): 0.000
+===================================
+
+./acotsp tests-small/euc2d-a280.tsp tests-small/euc2d-a280_worker.out WORKER 1000 1 2 0.5 42
+Config: num_blocks: 280, tpb: 1, shmem: 8192
+
+=== Iteration Timing Statistics ===
+Number of iterations: 1
+Min time (ms): 19.826
+Max time (ms): 19.826
+Mean time (ms): 19.826
+Stddev time (ms): 0.000
+===================================
+
+./acotsp tests-small/euc2d-berlin52.tsp tests-small/euc2d-berlin52_worker.out WORKER 1000 1 2 0.5 42
+Config: num_blocks: 52, tpb: 1, shmem: 8192
+
+=== Iteration Timing Statistics ===
+Number of iterations: 1
+Min time (ms): 13.373
+Max time (ms): 13.373
+Mean time (ms): 13.373
+Stddev time (ms): 0.000
+===================================
+
+./acotsp tests-small/euc2d-d198.tsp tests-small/euc2d-d198_worker.out WORKER 1000 1 2 0.5 42
+Config: num_blocks: 198, tpb: 1, shmem: 8192
+
+=== Iteration Timing Statistics ===
+Number of iterations: 1
+Min time (ms): 15.330
+Max time (ms): 15.330
+Mean time (ms): 15.330
+Stddev time (ms): 0.000
+===================================
+
+./acotsp tests-small/euc2d-d657.tsp tests-small/euc2d-d657_worker.out WORKER 1000 1 2 0.5 42
+Config: num_blocks: 657, tpb: 1, shmem: 8192
+
+=== Iteration Timing Statistics ===
+Number of iterations: 1
+Min time (ms): 64.922
+Max time (ms): 64.922
+Mean time (ms): 64.922
+Stddev time (ms): 0.000
+===================================
+
+./acotsp tests-small/euc2d-eil51.tsp tests-small/euc2d-eil51_worker.out WORKER 1000 1 2 0.5 42
+Config: num_blocks: 51, tpb: 1, shmem: 8192
+
+=== Iteration Timing Statistics ===
+Number of iterations: 1
+Min time (ms): 14.747
+Max time (ms): 14.747
+Mean time (ms): 14.747
+Stddev time (ms): 0.000
+===================================
+
+./acotsp tests-small/euc2d-lin318.tsp tests-small/euc2d-lin318_worker.out WORKER 1000 1 2 0.5 42
+Config: num_blocks: 318, tpb: 1, shmem: 8192
+
+=== Iteration Timing Statistics ===
+Number of iterations: 1
+Min time (ms): 23.170
+Max time (ms): 23.170
+Mean time (ms): 23.170
+Stddev time (ms): 0.000
+===================================
+
+./acotsp tests-small/euc2d-pcb442.tsp tests-small/euc2d-pcb442_worker.out WORKER 1000 1 2 0.5 42
+Config: num_blocks: 442, tpb: 1, shmem: 8192
+
+=== Iteration Timing Statistics ===
+Number of iterations: 1
+Min time (ms): 31.591
+Max time (ms): 31.591
+Mean time (ms): 31.591
+Stddev time (ms): 0.000
+===================================
+
+./acotsp tests-small/euc2d-pr1002.tsp tests-small/euc2d-pr1002_worker.out WORKER 1000 1 2 0.5 42
+Config: num_blocks: 1002, tpb: 1, shmem: 8192
+
+=== Iteration Timing Statistics ===
+Number of iterations: 1
+Min time (ms): 187.613
+Max time (ms): 187.613
+Mean time (ms): 187.613
+Stddev time (ms): 0.000
+===================================
+
+./acotsp tests-small/euc2d-rat783.tsp tests-small/euc2d-rat783_worker.out WORKER 1000 1 2 0.5 42
+Config: num_blocks: 783, tpb: 1, shmem: 8192
+
+=== Iteration Timing Statistics ===
+Number of iterations: 1
+Min time (ms): 88.114
+Max time (ms): 88.114
+Mean time (ms): 88.114
+Stddev time (ms): 0.000
+===================================
+
+./acotsp tests-small/geo-ali535.tsp tests-small/geo-ali535_worker.out WORKER 1000 1 2 0.5 42
+Config: num_blocks: 535, tpb: 1, shmem: 8192
+
+=== Iteration Timing Statistics ===
+Number of iterations: 1
+Min time (ms): 31.890
+Max time (ms): 31.890
+Mean time (ms): 31.890
+Stddev time (ms): 0.000
+===================================
+
+./acotsp tests-small/geo-burma14.tsp tests-small/geo-burma14_worker.out WORKER 1000 1 2 0.5 42
+Config: num_blocks: 14, tpb: 1, shmem: 8192
+
+=== Iteration Timing Statistics ===
+Number of iterations: 1
+Min time (ms): 13.822
+Max time (ms): 13.822
+Mean time (ms): 13.822
+Stddev time (ms): 0.000
+===================================
+
+./acotsp tests-small/geo-gr431.tsp tests-small/geo-gr431_worker.out WORKER 1000 1 2 0.5 42
+Config: num_blocks: 431, tpb: 1, shmem: 8192
+
+=== Iteration Timing Statistics ===
+Number of iterations: 1
+Min time (ms): 25.672
+Max time (ms): 25.672
+Mean time (ms): 25.672
+Stddev time (ms): 0.000
+===================================
+
+./acotsp tests-small/geo-gr96.tsp tests-small/geo-gr96_worker.out WORKER 1000 1 2 0.5 42
+Config: num_blocks: 96, tpb: 1, shmem: 8192
+
+=== Iteration Timing Statistics ===
+Number of iterations: 1
+Min time (ms): 15.244
+Max time (ms): 15.244
+Mean time (ms): 15.244
+Stddev time (ms): 0.000
+===================================
+
+./acotsp tests-small/geo-ulysses16.tsp tests-small/geo-ulysses16_worker.out WORKER 1000 1 2 0.5 42
+Config: num_blocks: 16, tpb: 1, shmem: 8192
+
+=== Iteration Timing Statistics ===
+Number of iterations: 1
+Min time (ms): 14.534
+Max time (ms): 14.534
+Mean time (ms): 14.534
+Stddev time (ms): 0.000
+===================================
+
+./acotsp tests-small/geo-ulysses22.tsp tests-small/geo-ulysses22_worker.out WORKER 1000 1 2 0.5 42
+Config: num_blocks: 22, tpb: 1, shmem: 8192
+
+=== Iteration Timing Statistics ===
+Number of iterations: 1
+Min time (ms): 14.560
+Max time (ms): 14.560
+Mean time (ms): 14.560
+Stddev time (ms): 0.000
+===================================
+
+make[1]: Leaving directory '/home/balawender/ant-colony-cuda'
