@@ -24,7 +24,7 @@ __device__ void prescan(float *temp, int n)
     {
         __syncthreads();
 
-        if (thid < d && (offset * (2 * thid + 2) - 1) < n)
+        if (thid < d)
         {
             int ai = offset * (2 * thid + 1) - 1;
             int bi = offset * (2 * thid + 2) - 1;
@@ -40,7 +40,7 @@ __device__ void prescan(float *temp, int n)
         offset >>= 1;
         __syncthreads();
         
-        if (thid < d && (offset * (2 * thid + 2) - 1) < n)
+        if (thid < d)
         {
             int ai = offset * (2 * thid + 1) - 1;
             int bi = offset * (2 * thid + 2) - 1;

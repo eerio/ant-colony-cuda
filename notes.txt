@@ -281,3 +281,39 @@ Max time (ms): 5.572
 Mean time (ms): 4.290
 Stddev time (ms): 0.427
 ===================================
+
+
+OPTIMIZATION: coalesce read row_choice_info 08567e0c9784ae84aa13f31cbf9cc0439e56724f
+./acotsp tests-small/euc2d-pr1002.tsp tests-small/euc2d-pr1002_queen.out QUEEN 10 1 2 0.5 425
+Config: num_blocks: 68, tpb: 1002, shmem: 12120
+
+=== Iteration Timing Statistics ===
+Number of iterations: 10
+Min time (ms): 43.565
+Max time (ms): 44.994
+Mean time (ms): 43.731
+Stddev time (ms): 0.421
+===================================
+
+./acotsp tests-small/geo-gr96.tsp tests-small/geo-gr96_queen.out QUEEN 10 1 2 0.5 425
+Config: num_blocks: 68, tpb: 96, shmem: 4872
+
+=== Iteration Timing Statistics ===
+Number of iterations: 10
+Min time (ms): 4.205
+Max time (ms): 5.678
+Mean time (ms): 4.354
+Stddev time (ms): 0.441
+
+
+OPTIMIZATION: wywal checka z prefix sum
+./acotsp tests-small/euc2d-pr1002.tsp tests-small/euc2d-pr1002_queen.out QUEEN 10 1 2 0.5 425
+Config: num_blocks: 68, tpb: 1002, shmem: 12120
+
+=== Iteration Timing Statistics ===
+Number of iterations: 10
+Min time (ms): 39.461
+Max time (ms): 40.888
+Mean time (ms): 39.629
+Stddev time (ms): 0.420
+===================================
