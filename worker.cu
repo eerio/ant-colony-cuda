@@ -7,6 +7,7 @@
 #include <float.h> // For FLT_EPSILON
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include "tsp.h"
 
 #define MAX_CITIES 1024
@@ -125,7 +126,7 @@ TspResult solveTSPWorker(
     HANDLE_ERROR(cudaEventCreate(&iter_start));
     HANDLE_ERROR(cudaEventCreate(&iter_end));
 
-    // cudaStream_t stream;
+    cudaStream_t stream;
     // std::vector<cudaGraphNode_t> _node_list;
     // cudaGraphExec_t _graph_exec;
     // cudaGraphNode_t new_node;
@@ -149,15 +150,16 @@ TspResult solveTSPWorker(
     // cudakernelNodeParams _dynamic_params_updated_cuda;
     // cudaGraphExecKernelNodeSetParams(_graph_exec, _node_list[0], &_dynamic_params_updated_cuda);
 
-    // bool graphCreated=false;
-    // cudaGraph_t graph;
-    // cudaGraphExec_t instance;
+    bool graphCreated=false;
+    cudaGraph_t graph;
+    cudaGraphExec_t instance;
+    auto start = std::chrono::high_resolution_clock::now();
     for (unsigned int iter = 0; iter < num_iter; ++iter) {
         // cudaDeviceSynchronize();
         HANDLE_ERROR(cudaEventRecord(iter_start));
         
-        // if (!graphCreated) {
-            // cudaStreamBeginCapture(0, cudaStreamCaptureModeGlobal);
+        if (!graphCreated) {
+            cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
             computeChoiceInfo(d_choice_info, d_pheromone, d_distances, num_cities, alpha, beta);
             
             tourConstructionKernelWorker<<<num_blocks, threads_per_block, shared_memory_size>>>(
@@ -175,14 +177,14 @@ TspResult solveTSPWorker(
                 d_pheromone, d_ant_tours, d_tour_lengths, num_ants, num_cities
             );
             
-            // cudaStreamEndCapture(0, &graph);
-            // cudaGraphInstantiate(&instance, graph, NULL, NULL, 0);
-            // graphCreated = true;
-        // }
+            cudaStreamEndCapture(stream, &graph);
+            cudaGraphInstantiate(&instance, graph, NULL, NULL, 0);
+            graphCreated = true;
+        }
         
-        // cudaGraphLaunch(instance, 0);
-        // cudaStreamSynchronize(0);
-        // cudaDeviceSynchronize();
+        cudaGraphLaunch(instance, stream);
+        cudaStreamSynchronize(stream);
+        cudaDeviceSynchronize();
 
         HANDLE_ERROR(cudaEventRecord(iter_end));
         HANDLE_ERROR(cudaEventSynchronize(iter_end));
@@ -190,6 +192,11 @@ TspResult solveTSPWorker(
         HANDLE_ERROR(cudaEventElapsedTime(&elapsed_ms, iter_start, iter_end));
         iteration_times_ms.push_back(elapsed_ms);
     }
+    cudaDeviceSynchronize();
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<float, std::milli> duration_ms = end - start;
+    iteration_times_ms.clear();
+    iteration_times_ms.push_back(duration_ms.count());
     HANDLE_ERROR(cudaEventDestroy(iter_start));
     HANDLE_ERROR(cudaEventDestroy(iter_end));
 

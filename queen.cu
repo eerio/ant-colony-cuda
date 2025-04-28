@@ -7,6 +7,7 @@
 #include <float.h>
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include "tsp.h"
 #include <cub/cub.cuh>
 
@@ -190,24 +191,48 @@ TspResult solveTSPQueen(
     cudaEvent_t iter_start, iter_end;
     HANDLE_ERROR(cudaEventCreate(&iter_start));
     HANDLE_ERROR(cudaEventCreate(&iter_end));
+    cudaStream_t stream;
+    bool graphCreated=false;
+    cudaGraph_t graph;
+    cudaGraphExec_t instance;
+    auto start = std::chrono::high_resolution_clock::now();
     for (unsigned int iter = 0; iter < num_iter; ++iter) {
+        // cudaDeviceSynchronize();
+        // I made some mess here, for some reason any other configuration of instrumentation like:
+        // - removing eventRecords
+        // - moving this eventRecord lower in this loop
+        // - changing it to chrono
+        // - moving it outside of the loop etc.
+        // segfaults! i wasn't able to find the reason in time
         HANDLE_ERROR(cudaEventRecord(iter_start));
-        computeChoiceInfo(d_choice_info, d_pheromone, d_distances, num_cities, alpha, beta);
-
-        tourConstructionKernelQueen<<<num_blocks, threads_per_block, shared_memory_size>>>(
-            d_ant_tours, d_choice_info, num_queens, num_cities, d_rand_states
-        );
+        
+        if (!graphCreated) {
+            cudaStreamBeginCapture(stream, cudaStreamCaptureModeGlobal);
+            computeChoiceInfo(d_choice_info, d_pheromone, d_distances, num_cities, alpha, beta);
+            
+            tourConstructionKernelQueen<<<num_blocks, threads_per_block, shared_memory_size>>>(
+                d_ant_tours, d_choice_info, num_queens, num_cities, d_rand_states
+            );
+            cudaDeviceSynchronize();
+            
+            evaporatePheromone(d_pheromone, evaporate, num_cities);
+            
+            computeTourLengths(
+                d_ant_tours, d_distances, d_tour_lengths, num_queens, num_cities
+            );
+            
+            depositPheromone(
+                d_pheromone, d_ant_tours, d_tour_lengths, num_queens, num_cities
+            );
+            
+            cudaStreamEndCapture(stream, &graph);
+            cudaGraphInstantiate(&instance, graph, NULL, NULL, 0);
+            graphCreated = true;
+        }
+        
+        cudaGraphLaunch(instance, stream);
+        cudaStreamSynchronize(stream);
         cudaDeviceSynchronize();
-
-        evaporatePheromone(d_pheromone, evaporate, num_cities);
-
-        computeTourLengths(
-            d_ant_tours, d_distances, d_tour_lengths, num_queens, num_cities
-        );
-
-        depositPheromone(
-            d_pheromone, d_ant_tours, d_tour_lengths, num_queens, num_cities
-        );
 
         HANDLE_ERROR(cudaEventRecord(iter_end));
         HANDLE_ERROR(cudaEventSynchronize(iter_end));
@@ -215,6 +240,11 @@ TspResult solveTSPQueen(
         HANDLE_ERROR(cudaEventElapsedTime(&elapsed_ms, iter_start, iter_end));
         iteration_times_ms.push_back(elapsed_ms);
     }
+    cudaDeviceSynchronize();
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<float, std::milli> duration_ms = end - start;
+    iteration_times_ms.clear();
+    iteration_times_ms.push_back(duration_ms.count());
     HANDLE_ERROR(cudaEventDestroy(iter_start));
     HANDLE_ERROR(cudaEventDestroy(iter_end));
 
