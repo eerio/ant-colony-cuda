@@ -68,14 +68,19 @@ __global__ void tourConstructionKernelWorker(
                 }
             }
 
+            if (next_city == -1) {
+                for (int j=0; j < num_cities; ++j) {
+                    if (!ant_visited[j]) {
+                        next_city = j;
+                        break;
+                    }
+                }
+            }
+
             ant_tour[step] = next_city;
             ant_visited[next_city] = true;
             current_city = next_city;
         }
-
-        // for (int j=0; j < num_cities; ++j) {
-        //     d_ant_tours[ant_idx * num_cities + j] = ant_tour[j];
-        // }
 
         d_rand_state[ant_idx] = local_state;
     }
@@ -110,7 +115,7 @@ TspResult solveTSPWorker(
     
     // 4: number of units on a single SM of RTX 2080 Ti
     assert(thread_memory_size < max_shmem_per_block / 4);
-    int threads_per_block = 1;  //max_shmem_per_block / thread_memory_size;
+    int threads_per_block = max_shmem_per_block / thread_memory_size;
     int shared_memory_size = thread_memory_size * threads_per_block; // per block!
 
     cudaDeviceGetAttribute(&value, cudaDevAttrMaxThreadsPerBlock, 0);
@@ -119,7 +124,7 @@ TspResult solveTSPWorker(
     assert(shared_memory_size > 0);
     assert(shared_memory_size <= max_shmem_per_block);
     cudaDeviceGetAttribute(&value, cudaDevAttrMaxSharedMemoryPerMultiprocessor, 0);
-    assert(num_blocks / 68 <= 32); // rtx 2080ti: max 32 blocks per SM
+    // assert(num_blocks / 68 <= 32); // rtx 2080ti: max 32 blocks per SM
     assert(num_blocks <= MAX_BLOCKS);
 
     printf("Config: num_blocks: %d, tpb: %d, shmem: %d\n", num_blocks, threads_per_block, shared_memory_size);
