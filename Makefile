@@ -59,12 +59,12 @@ tests-small/%_baseline.out: tests/%.tsp
 run_worker_parallel: acotsp $(TSP_FILES:.tsp=_worker.out)
 # run_worker_parallel: acotsp tests/euc2d-pr1002_worker.out tests/euc2d-d1291_worker.out tests/geo-gr96_worker.out
 tests-small/%_worker.out: tests-small/%.tsp
-	./acotsp $< $@ WORKER 10 1 1.2 0.9 425
+	./acotsp $< $@ WORKER 10 1 2 0.5 425
 
 # run_queen_parallel: acotsp tests/euc2d-pr1002_queen.out tests/euc2d-d657_queen.out tests/geo-gr96_queen.out
 run_queen_parallel: acotsp $(TSP_FILES:.tsp=_queen.out)
 tests-small/%_queen.out: tests-small/%.tsp
-	./acotsp $< $@ QUEEN 10 1 1.2 0.9 425
+	./acotsp $< $@ QUEEN 10 1 2 0.5 425
 
 TSPLIB_SOLUTIONS = tsplib/solutions
 
