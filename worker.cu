@@ -149,37 +149,40 @@ TspResult solveTSPWorker(
     // cudakernelNodeParams _dynamic_params_updated_cuda;
     // cudaGraphExecKernelNodeSetParams(_graph_exec, _node_list[0], &_dynamic_params_updated_cuda);
 
-    bool graphCreated=false;
-    cudaGraph_t graph;
-    cudaGraphExec_t instance;
+    // bool graphCreated=false;
+    // cudaGraph_t graph;
+    // cudaGraphExec_t instance;
     for (unsigned int iter = 0; iter < num_iter; ++iter) {
+        // cudaDeviceSynchronize();
         HANDLE_ERROR(cudaEventRecord(iter_start));
-        if (!graphCreated) {
-            cudaStreamBeginCapture(0, cudaStreamCaptureModeGlobal);
+        
+        // if (!graphCreated) {
+            // cudaStreamBeginCapture(0, cudaStreamCaptureModeGlobal);
             computeChoiceInfo(d_choice_info, d_pheromone, d_distances, num_cities, alpha, beta);
-
+            
             tourConstructionKernelWorker<<<num_blocks, threads_per_block, shared_memory_size>>>(
                 d_ant_tours, d_choice_info, num_ants, num_cities, d_rand_states
             );
             cudaDeviceSynchronize();
             
             evaporatePheromone(d_pheromone, evaporate, num_cities);
-
+            
             computeTourLengths(
                 d_ant_tours, d_distances, d_tour_lengths, num_ants, num_cities
             );
-
+            
             depositPheromone(
                 d_pheromone, d_ant_tours, d_tour_lengths, num_ants, num_cities
             );
             
-            cudaStreamEndCapture(0, &graph);
-            cudaGraphInstantiate(&instance, graph, NULL, NULL, 0);
-            graphCreated = true;
-        }
+            // cudaStreamEndCapture(0, &graph);
+            // cudaGraphInstantiate(&instance, graph, NULL, NULL, 0);
+            // graphCreated = true;
+        // }
         
-        cudaGraphLaunch(instance, 0);
-        cudaStreamSynchronize(0);
+        // cudaGraphLaunch(instance, 0);
+        // cudaStreamSynchronize(0);
+        // cudaDeviceSynchronize();
 
         HANDLE_ERROR(cudaEventRecord(iter_end));
         HANDLE_ERROR(cudaEventSynchronize(iter_end));
