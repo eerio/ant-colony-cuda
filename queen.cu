@@ -11,7 +11,6 @@
 
 #include <cub/cub.cuh>
 
-
 #define MAX_CITIES 1024
 #define N_THREADS 1024
 
@@ -58,9 +57,11 @@ __device__ void prescan(float *temp, int n)
 
 using BlockLoadT = cub::BlockLoad<float, N_THREADS, (N_THREADS + MAX_CITIES - 1) / N_THREADS>;
 using BlockScanT = cub::BlockScan<float, N_THREADS>;
+using BlockReduceT = cub::BlockReduce<float, N_THREADS>;
 typedef union {
     typename BlockLoadT::TempStorage load;
     typename BlockScanT::TempStorage scan;
+    typename BlockReduceT::TempStorage reduce;
 } myTempStorageT;
 
 struct Shared {
@@ -78,6 +79,8 @@ __global__ void tourConstructionKernelQueen(
     int num_cities,
     curandState *states
 ) {
+    printf("Hello from kernel!\n");
+    assert(false);
     // extern __shared__ float shared_data[]; 
     // float *selection_probs = shared_data;      // Shared memory for selection probs
     // int *tabu_list = (int*)&selection_probs[MAX_CITIES + 1]; // Shared memory for tabu list
@@ -117,7 +120,7 @@ __global__ void tourConstructionKernelQueen(
 
         const float* current_row_global = choice_info + current_city * num_cities; // Source pointer in global memory
         float threadData[1];
-        BlockLoadT(cubStorage->load).Load(current_row_global, threadData);
+        BlockLoadT(cubStorage->load).Load(current_row_global, threadData, num_cities);
         row_choice_info[worker_id] = threadData[0];
         
         // for (int j=worker_id; j < num_cities; j += blockDim.x) {
@@ -140,6 +143,7 @@ __global__ void tourConstructionKernelQueen(
         // prescan(selection_probs, MAX_CITIES); // destroys last city, but it's saved already
         threadData[0] = selection_probs[worker_id];
         BlockScanT(cubStorage->scan).ExclusiveSum(threadData, threadData);
+        selection_probs[worker_id] = threadData[0];
         __syncthreads();
         if (worker_id == 0) {
             selection_probs[MAX_CITIES] += selection_probs[MAX_CITIES - 1];
@@ -148,25 +152,42 @@ __global__ void tourConstructionKernelQueen(
         __syncthreads();
 
         // Draw random value for roulette selection
-        float rand_val = curand_uniform(&local_state) * *total_sum;
+        assert(selection_probs[num_cities] == *total_sum);
+        float rand_val = curand_uniform(&local_state) * *total_sum - FLT_MIN;
 
         // Perform Roulette Wheel-style selection
-        int selected_city = -1;
-        if (worker_id == 0) {
-            *total_sum = -1;
+        if (worker_id >= num_cities) {
+            threadData[0] = N_THREADS + 1;
+        } else if (tabu_list[worker_id]) {
+            threadData[0] = N_THREADS + 1;
+        } else if (rand_val < selection_probs[worker_id + 1]) {
+            threadData[0] = N_THREADS + 1;
+        } else {
+            threadData[0] = worker_id;
         }
+        float selected_cityf = BlockReduceT(cubStorage->reduce).Reduce(threadData, cub::Min());
+        int selected_city = selected_cityf;
         __syncthreads();
-        if (
-            (worker_id == 0 && selection_probs[1] >= rand_val)
-            || (selection_probs[worker_id + 1] >= rand_val && selection_probs[worker_id] < rand_val)
-         ) {
-            // hack; change to another shared variable
-            // if (tabu_list[worker_id]) {
-            //     printf("This is weird! %d %f %f %f %f\n", worker_id, selection_probs[worker_id], selection_probs[worker_id + 1], rand_val, *total_sum);
-            //     assert(false);
-            // }
-            if (!tabu_list[worker_id]) {*total_sum = worker_id;}
+        if (worker_id == 0) {
+            printf("Selected city: %d\n", selected_city);
+            assert(0 <= selected_city && selected_city < num_cities && !tabu_list[selected_city]);
+            *total_sum = selected_city;
         }
+        // if (worker_id == 0) {
+        //     *total_sum = -1;
+        // }
+        // __syncthreads();
+        // if (
+        //     (worker_id == 0 && selection_probs[1] >= rand_val)
+        //     || (selection_probs[worker_id + 1] >= rand_val && selection_probs[worker_id] < rand_val)
+        //  ) {
+        //     // hack; change to another shared variable
+        //     // if (tabu_list[worker_id]) {
+        //     //     printf("This is weird! %d %f %f %f %f\n", worker_id, selection_probs[worker_id], selection_probs[worker_id + 1], rand_val, *total_sum);
+        //     //     assert(false);
+        //     // }
+        //     if (!tabu_list[worker_id]) {*total_sum = worker_id;}
+        // }
         __syncthreads();
         if (worker_id == 0 && (int)*total_sum == -1) {
             // shouldn't happen
@@ -201,8 +222,8 @@ TspResult solveTSPQueen(
 ) {
     int num_cities = tsp_input.dimension;
     int num_queens = 68;
-    int num_workers = 3;//num_cities;
-    assert(num_cities >= num_workers);
+    int num_workers = N_THREADS; //num_cities;
+    // assert(num_cities >= num_workers);
     assert(num_cities / num_queens <= 32);
     assert(num_cities <= 1024);
 
@@ -226,6 +247,7 @@ TspResult solveTSPQueen(
     // assert(thread_memory_size < max_shmem_per_block);
     // assert(thread_memory_size < max_shmem_per_block / 4);
     int threads_per_block = num_workers; // max_shmem_per_block / thread_memory_size;
+    // int threads_per_block = N_THREADS;
     // int shared_memory_size = thread_memory_size; // per block!
     int shared_memory_size = sizeof(Shared);
 
@@ -274,6 +296,11 @@ TspResult solveTSPQueen(
             d_ant_tours, d_choice_info, num_queens, num_cities, d_rand_states
         );
         cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            printf("CUDA error: %s\n", cudaGetErrorString(err));
+            exit(1);
+        }
 
 #ifdef DEBUG
         int* h_ant_tours = new int[num_queens * num_cities];
