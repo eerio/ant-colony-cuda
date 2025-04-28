@@ -1,19 +1,29 @@
 NVCC = /usr/local/cuda/bin/nvcc
 # NVCCFLAGS = -O3 -Iinclude -DDEBUG # For Titan V (compute capability 7.0)
 # NVCCFLAGS = -O3 -Iinclude -G -g -DMAX_SHMEM_SIZE=24576 # For Titan V (compute capability 7.0)
-NVCCFLAGS = -O3 -Iinclude -G -g # For Titan V (compute capability 7.0)
 
 TSP_FILES=$(wildcard tests-small/*.tsp)
 
+NVCCFLAGS = -O3 -Iinclude -arch=sm_75 # For Titan V (compute capability 7.0)
+# SRUN_FLAGS = --partition=common --time 10 --nodelist=asusgpu6 --gres=gpu:rtx2080ti
+SRUN_FLAGS = --partition=common --time 10 --nodelist=asusgpu5 --gres=gpu:rtx2080ti
+
+# NVCCFLAGS = -O3 -Iinclude -G -g -arch=sm_70 # For Titan V (compute capability 7.0)
+# SRUN_FLAGS = --partition=common --time 10 --nodelist=sylvester,steven,asusgpu3,asusgpu1 --gres=gpu:titanv
+# SRUN_FLAGS = --partition=common --time 10 --nodelist=asusgpu3 --gres=gpu:titanv
+
+# 100 iters, alpha 1, beta 1.1, rho 0.9, seed 42
+TSP_FLAGS = 100 1 1.1 0.9 42
+
 all: acotsp
 
+# TMPDIR=build srun --partition=common --time 10 --gres=gpu:titanv -- $(NVCC) $(NVCCFLAGS) --device-c $< -o $@
 %.o: %.cu tsp.cu
-	# TMPDIR=build srun --partition=common --time 10 --gres=gpu:titanv -- $(NVCC) $(NVCCFLAGS) --device-c $< -o $@
-	TMPDIR=build srun --partition=common --time 10 --nodelist=asusgpu6 --gres=gpu:rtx2080ti -- $(NVCC) $(NVCCFLAGS) --device-c $< -o $@
+	TMPDIR=build srun $(SRUN_FLAGS) -- $(NVCC) $(NVCCFLAGS) --device-c $< -o $@
 
+# TMPDIR=build srun --partition=common --time 10 --gres=gpu:titanv -- $(NVCC) $(NVCCFLAGS) $^ -o $@
 acotsp: main.o worker.o queen.o baseline.o tsp.o
-	# TMPDIR=build srun --partition=common --time 10 --gres=gpu:titanv -- $(NVCC) $(NVCCFLAGS) $^ -o $@
-	TMPDIR=build srun --partition=common --time 10 --nodelist=asusgpu6 --gres=gpu:rtx2080ti -- $(NVCC) $(NVCCFLAGS) $^ -o $@
+	TMPDIR=build srun $(SRUN_FLAGS) -- $(NVCC) $(NVCCFLAGS) $^ -o $@
 
 clean:
 	rm -rf *.o test balawender.zip acotsp out.txt
@@ -28,19 +38,19 @@ balawender.zip: *.cu Makefile include/*.h
 pack: balawender.zip
 	@echo "Packaged balawender.zip with source files and Makefile."
 
-test/balawender/acotsp: balawender.zip
-	rm -rf test && \
-	mkdir -p test && \
-	cp balawender.zip test/ && \
-	cd test && \
-	unzip balawender.zip && \
-	cd balawender && \
-	cp -r ../../tsplib/ . && \
-	make clean && \
-	make && \
-	TMPDIR=build srun --partition=common --time 10 --nodelist=asusgpu6 --gres=gpu:rtx2080ti -- ./acotsp tsplib/a280.tsp out.txt BASELINE 10 1 2 0.5 42; \
-	head -n 1 out.txt; \
-	cat tsplib/solutions | grep a280 ; \
+# test/balawender/acotsp: balawender.zip
+# 	rm -rf test && \
+# 	mkdir -p test && \
+# 	cp balawender.zip test/ && \
+# 	cd test && \
+# 	unzip balawender.zip && \
+# 	cd balawender && \
+# 	cp -r ../../tsplib/ . && \
+# 	make clean && \
+# 	make && \
+# 	TMPDIR=build srun $(SRUN_FLAGS) --  ./acotsp tsplib/a280.tsp out.txt BASELINE $(TSP_FLAGS); \
+# 	head -n 1 out.txt; \
+# 	cat tsplib/solutions | grep a280 ; \
 
 test: test/balawender/acotsp
 
@@ -54,17 +64,17 @@ test: test/balawender/acotsp
 
 run_baseline_parallel: acotsp $(TSP_FILES:.tsp=_baseline.out)
 tests-small/%_baseline.out: tests/%.tsp
-	./acotsp $< $@ BASELINE 5 10 2 0.5 42
+	./acotsp $< $@ BASELINE $(TSP_FLAGS)
 
 run_worker_parallel: acotsp $(TSP_FILES:.tsp=_worker.out)
 # run_worker_parallel: acotsp tests/euc2d-pr1002_worker.out tests/euc2d-d1291_worker.out tests/geo-gr96_worker.out
 tests-small/%_worker.out: tests-small/%.tsp
-	./acotsp $< $@ WORKER 10 1 2 0.5 425
+	./acotsp $< $@ WORKER $(TSP_FLAGS)
 
 # run_queen_parallel: acotsp tests/euc2d-pr1002_queen.out tests/euc2d-d657_queen.out tests/geo-gr96_queen.out
 run_queen_parallel: acotsp $(TSP_FILES:.tsp=_queen.out)
 tests-small/%_queen.out: tests-small/%.tsp
-	./acotsp $< $@ QUEEN 10 1 2 0.5 425
+	./acotsp $< $@ QUEEN $(TSP_FLAGS)
 
 TSPLIB_SOLUTIONS = tsplib/solutions
 
@@ -80,10 +90,10 @@ tests/%_tsplibsolution.out: tests/%.tsp $(TSPLIB_SOLUTIONS)
 all-tsplib-solutions: $(patsubst tests/%.tsp, tests/%_tsplibsolution.out, $(TSP_FILES))
 
 rerun_worker:
-	rm tests-small/*_worker.out; TMPDIR=build srun --partition=common --time 10 --nodelist=asusgpu6 --gres=gpu:rtx2080ti -- make run_worker_parallel
+	rm tests-small/*_worker.out; TMPDIR=build srun $(SRUN_FLAGS) -- make run_worker_parallel
 
 rerun_queen:
-	rm tests-small/*_queen.out; TMPDIR=build srun --partition=common --time 10 --nodelist=asusgpu6 --gres=gpu:rtx2080ti -- make run_queen_parallel
+	rm tests-small/*_queen.out; TMPDIR=build srun $(SRUN_FLAGS) -- make run_queen_parallel
 
 check_worker:
 	python3 check_results_worker.py

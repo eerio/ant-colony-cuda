@@ -9,6 +9,8 @@
 #include <cmath>
 #include "tsp.h"
 
+#define MAX_CITIES 1024
+
 __global__ void tourConstructionKernelWorker(
     int* d_ant_tours, // [A * N global]
     const float* d_choice_info, // [N * N global]
@@ -16,74 +18,67 @@ __global__ void tourConstructionKernelWorker(
     int num_cities,
     curandState* d_rand_state
 ) {
-    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    int ant_idx = blockIdx.x * blockDim.x + threadIdx.x;
 
     // ensure that memory is float-aligned
     extern __shared__ float shared[];
-    int float_section_size = num_cities * sizeof(float);  // selection_probs
-    // ant_visited; round up to multiple of 4
-    int bool_section_size_aligned = ((sizeof(float) + num_cities * sizeof(bool) - 1) / sizeof(float)) * sizeof(float);
-    int thread_memory_size = float_section_size + bool_section_size_aligned;
-    char *my_mem = (char*)shared + threadIdx.x * thread_memory_size;
-
-    float *selection_probs = (float*)my_mem;
-    bool *ant_visited = (bool*)((char*)my_mem + float_section_size);
+    float *selection_probs = (float*)shared;
+    bool *ant_visited = (bool*)&selection_probs[MAX_CITIES];
     
-    for (int ant_idx=tid; ant_idx < num_ants; ant_idx += gridDim.x * blockDim.x) {
-        int *ant_tour = &d_ant_tours[ant_idx * num_cities];
+    assert(ant_idx + gridDim.x * blockDim.x >= num_ants);
+    int *ant_tour = &d_ant_tours[ant_idx * num_cities];
 
-        for (int j = 0; j < num_cities; ++j) ant_visited[j] = false;
+    for (int j = 0; j < num_cities; ++j) ant_visited[j] = false;
 
-        int current_city = ant_idx % num_cities;
-        ant_tour[0] = current_city;
-        ant_visited[current_city] = true;
+    int current_city = ant_idx % num_cities;
+    ant_tour[0] = current_city;
+    ant_visited[current_city] = true;
 
-        curandState local_state = d_rand_state[ant_idx];
+    curandState local_state = d_rand_state[ant_idx];
 
-        for (int step = 1; step < num_cities; ++step) {
-            float sum_probs = 0.0f;
-            // float* selection_probs = &d_selection_probs[i * num_cities];
+    for (int step = 1; step < num_cities; ++step) {
+        float sum_probs = 0.0f;
+        // float* selection_probs = &d_selection_probs[i * num_cities];
 
-            for (int j = 0; j < num_cities; ++j) {
-                if (!ant_visited[j]) {
-                    int idx = current_city * num_cities + j;
-                    selection_probs[j] = d_choice_info[idx];
-                    sum_probs += selection_probs[j];
-                } else {
-                    selection_probs[j] = 0.0f;
-                }
+        for (int j = 0; j < num_cities; ++j) {
+            if (!ant_visited[j]) {
+                int idx = current_city * num_cities + j;
+                selection_probs[j] = d_choice_info[idx];
+                sum_probs += selection_probs[j];
+            } else {
+                selection_probs[j] = 0.0f;
             }
-
-            float r = curand_uniform(&local_state) * sum_probs;
-            float accumulated_prob = 0.0f;
-            int next_city = -1;
-
-            for (int j = 0; j < num_cities; ++j) {
-                if (selection_probs[j] > 0.0f && !ant_visited[j]) {
-                    accumulated_prob += selection_probs[j];
-                    if (accumulated_prob >= r) {
-                        next_city = j;
-                        break;
-                    }
-                }
-            }
-
-            if (next_city == -1) {
-                for (int j=0; j < num_cities; ++j) {
-                    if (!ant_visited[j]) {
-                        next_city = j;
-                        break;
-                    }
-                }
-            }
-
-            ant_tour[step] = next_city;
-            ant_visited[next_city] = true;
-            current_city = next_city;
         }
 
-        d_rand_state[ant_idx] = local_state;
+        float r = curand_uniform(&local_state) * sum_probs;
+        float accumulated_prob = 0.0f;
+        int next_city = -1;
+
+        for (int j = 0; j < num_cities; ++j) {
+            if (selection_probs[j] > 0.0f && !ant_visited[j]) {
+                accumulated_prob += selection_probs[j];
+                if (accumulated_prob >= r) {
+                    next_city = j;
+                    break;
+                }
+            }
+        }
+
+        if (next_city == -1) {
+            for (int j=0; j < num_cities; ++j) {
+                if (!ant_visited[j]) {
+                    next_city = j;
+                    break;
+                }
+            }
+        }
+
+        ant_tour[step] = next_city;
+        ant_visited[next_city] = true;
+        current_city = next_city;
     }
+
+    d_rand_state[ant_idx] = local_state;
 }
 
 
@@ -97,55 +92,30 @@ TspResult solveTSPWorker(
 ) {
     int num_cities = tsp_input.dimension;
     int num_ants = num_cities;
+    int num_blocks = num_ants;
 
-    int value;
-    cudaDeviceGetAttribute(&value, cudaDevAttrMaxSharedMemoryPerBlock, 0);
-    const int max_shmem_per_block = value;
-
-    // optimization: assign threads uniformly to blocks
-    // int num_blocks = (MAX_TPB + num_ants - 1) / MAX_TPB;
-    // int threads_per_block = MAX_TPB;
-    int num_blocks = num_ants; // rtx 2080ti has 68 SMs
-    // int threads_per_block = (68 + num_ants - 1) / 68;
-    
-    int float_section_size = num_cities * sizeof(float);  // selection_probs
-    // ant_visited; round up to multiple of 4
-    int bool_section_size_aligned = ((sizeof(float) + num_cities * sizeof(bool) - 1) / sizeof(float)) * sizeof(float);
+    int float_section_size = MAX_CITIES * sizeof(float); 
+    int bool_section_size_aligned = MAX_CITIES;
     int thread_memory_size = float_section_size + bool_section_size_aligned;
     
-    // 4: number of units on a single SM of RTX 2080 Ti
-    assert(thread_memory_size < max_shmem_per_block / 4);
-    int threads_per_block = max_shmem_per_block / thread_memory_size;
-    int shared_memory_size = thread_memory_size * threads_per_block; // per block!
-
-    cudaDeviceGetAttribute(&value, cudaDevAttrMaxThreadsPerBlock, 0);
-    assert(threads_per_block > 0);
-    assert(threads_per_block <= value);
-    assert(shared_memory_size > 0);
-    assert(shared_memory_size <= max_shmem_per_block);
-    cudaDeviceGetAttribute(&value, cudaDevAttrMaxSharedMemoryPerMultiprocessor, 0);
-    // assert(num_blocks / 68 <= 32); // rtx 2080ti: max 32 blocks per SM
-    assert(num_blocks <= MAX_BLOCKS);
+    int threads_per_block = 1;
+    int shared_memory_size = thread_memory_size;
 
     printf("Config: num_blocks: %d, tpb: %d, shmem: %d\n", num_blocks, threads_per_block, shared_memory_size);
 
     size_t matrix_size = sizeof(float) * num_cities * num_cities;
     int* d_ant_tours;
-    bool* d_ant_visited;
     curandState* d_rand_states;
     float* d_tour_lengths;
     float* d_choice_info;
     float* d_distances;
-    float* d_selection_probs;
     float* d_pheromone;
     cudaMalloc(&d_pheromone, matrix_size);
     cudaMalloc(&d_ant_tours, sizeof(int) * num_ants * num_cities);
-    cudaMalloc(&d_ant_visited, sizeof(bool) * num_ants * num_cities);
     cudaMalloc(&d_rand_states, sizeof(curandState) * num_ants);
     cudaMalloc(&d_tour_lengths, sizeof(float) * num_ants);
     cudaMalloc(&d_choice_info, matrix_size);
     cudaMalloc(&d_distances, matrix_size);
-    cudaMalloc(&d_selection_probs, sizeof(float) * num_ants * num_cities);
     cudaMemcpy(d_distances, tsp_input.distances, matrix_size, cudaMemcpyHostToDevice);
 
     initializeRandStates(d_rand_states, num_ants, seed);
@@ -163,6 +133,11 @@ TspResult solveTSPWorker(
             d_ant_tours, d_choice_info, num_ants, num_cities, d_rand_states
         );
         cudaDeviceSynchronize();
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            printf("CUDA error: %s\n", cudaGetErrorString(err));
+            exit(1);
+        }
 
 #ifdef DEBUG
         int* h_ant_tours = new int[num_ants * num_cities];
@@ -220,12 +195,10 @@ TspResult solveTSPWorker(
 
     cudaFree(d_ant_tours);
     cudaFree(d_pheromone);
-    cudaFree(d_ant_visited);
     cudaFree(d_rand_states);
     cudaFree(d_tour_lengths);
     cudaFree(d_choice_info);
     cudaFree(d_distances);
-    cudaFree(d_selection_probs);
 
     float sum = std::accumulate(iteration_times_ms.begin(), iteration_times_ms.end(), 0.0f);
     float mean = sum / iteration_times_ms.size();
