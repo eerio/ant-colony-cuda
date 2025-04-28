@@ -9,8 +9,11 @@
 #include <cmath>
 #include "tsp.h"
 
+#include <cub/cub.cuh>
+
 
 #define MAX_CITIES 1024
+#define N_THREADS 1024
 
 // this stores 0 in temp[0], stores sum(temp[0..n-2]) in temp[n-1], destroys temp[n-1]
 // it assumes that n is a power of two!!!!!!
@@ -53,6 +56,19 @@ __device__ void prescan(float *temp, int n)
     // __syncthreads();
 }
 
+typedef cub::BlockLoad<float, N_THREADS, (N_THREADS + MAX_CITIES - 1) / N_THREADS> BlockLoadT;
+typedef union {
+    typename BlockLoadT::TempStorage load;
+} myTempStorageT;
+
+struct Shared {
+    float selection_probs[MAX_CITIES + 1]; // + 1 for exclusive scan
+    int tabu_list[MAX_CITIES];
+    float total_sum;
+    float row_choice_info[MAX_CITIES];
+    myTempStorageT cubStorage; 
+};
+
 __global__ void tourConstructionKernelQueen(
     int *tours,
     const float *choice_info,
@@ -60,11 +76,18 @@ __global__ void tourConstructionKernelQueen(
     int num_cities,
     curandState *states
 ) {
-    extern __shared__ float shared_data[]; 
-    float *selection_probs = shared_data;      // Shared memory for selection probs
-    int *tabu_list = (int*)&selection_probs[MAX_CITIES + 1]; // Shared memory for tabu list
-    float *total_sum = (float *)&tabu_list[num_cities];
-    float *row_choice_info = (float *)&total_sum[1];
+    // extern __shared__ float shared_data[]; 
+    // float *selection_probs = shared_data;      // Shared memory for selection probs
+    // int *tabu_list = (int*)&selection_probs[MAX_CITIES + 1]; // Shared memory for tabu list
+    // float *total_sum = (float *)&tabu_list[MAX_CITIES];
+    // float *row_choice_info = (float *)&total_sum[1];
+    // myTempStorageT *cubStorage = (myTempStorageT *)&row_choice_info[MAX_CITIES];
+    extern __shared__ Shared shared_data[];
+    float *selection_probs = shared_data->selection_probs;
+    int *tabu_list = shared_data->tabu_list;
+    float *total_sum = &shared_data->total_sum;
+    float *row_choice_info = shared_data->row_choice_info;
+    myTempStorageT *cubStorage = &shared_data->cubStorage;
 
     int queen_id = blockIdx.x; // Each block handles one queen ant
     int worker_id = threadIdx.x; // Each thread in block is a worker (city checker)
@@ -90,9 +113,14 @@ __global__ void tourConstructionKernelQueen(
     for (int step = 1; step < num_cities; step++) {
         int current_city = tours[queen_id * num_cities + step - 1];
 
-        for (int j=worker_id; j < num_cities; j += blockDim.x) {
-            row_choice_info[j] = choice_info[current_city * num_cities + j];
-        }
+        const float* current_row_global = choice_info + current_city * num_cities; // Source pointer in global memory
+        float threadData[1];
+        BlockLoadT(cubStorage->load).Load(current_row_global, threadData);
+        row_choice_info[worker_id] = threadData[0];
+        
+        // for (int j=worker_id; j < num_cities; j += blockDim.x) {
+        //     row_choice_info[j] = choice_info[current_city * num_cities + j];
+        // }
         __syncthreads();
 
         // Compute selection probabilities
@@ -184,15 +212,18 @@ TspResult solveTSPQueen(
     int num_blocks = num_queens; // 68; // rtx 2080ti has 68 SMs
     // int threads_per_block = (68 + num_workers - 1) / 68;
     
-    int float_section_size = (MAX_CITIES + 1) * sizeof(float);  // selection_probs
-    // ant_visited; round up to multiple of 4
-    int int_section_size = num_cities * sizeof(int);
-    int thread_memory_size = float_section_size + int_section_size + sizeof(float) + (num_cities * sizeof(float));
+    // int float_section_size = (MAX_CITIES + 1) * sizeof(float);  // selection_probs
+    // // ant_visited; round up to multiple of 4
+    // int int_section_size = num_cities * sizeof(int);
+    // int thread_memory_size = float_section_size + int_section_size + sizeof(float) + (num_cities * sizeof(float)) + sizeof(myTempStorage);
+    // int thread_memory_size = sizeof(Shared);
     
     // 4: number of units on a single SM of RTX 2080 Ti
-    assert(thread_memory_size < max_shmem_per_block / 4);
+    // assert(thread_memory_size < max_shmem_per_block);
+    // assert(thread_memory_size < max_shmem_per_block / 4);
     int threads_per_block = num_workers; // max_shmem_per_block / thread_memory_size;
-    int shared_memory_size = thread_memory_size; // per block!
+    // int shared_memory_size = thread_memory_size; // per block!
+    int shared_memory_size = sizeof(Shared);
 
     cudaDeviceGetAttribute(&value, cudaDevAttrMaxThreadsPerBlock, 0);
     assert(threads_per_block > 0);
