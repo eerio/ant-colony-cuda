@@ -120,21 +120,25 @@ __global__ void tourConstructionKernelQueen(
 
         // Perform Roulette Wheel-style selection
         int selected_city = -1;
+        if (worker_id == 0) {
+            *total_sum = -1;
+        }
+        __syncthreads();
         if (
             (worker_id == 0 && selection_probs[1] >= rand_val)
             || (selection_probs[worker_id + 1] >= rand_val && selection_probs[worker_id] < rand_val)
          ) {
             // hack; change to another shared variable
-            if (tabu_list[worker_id]) {
-                printf("This is weird! %d %f %f %f %f\n", worker_id, selection_probs[worker_id], selection_probs[worker_id + 1], rand_val, *total_sum);
-                assert(false);
-            }
+            // if (tabu_list[worker_id]) {
+            //     printf("This is weird! %d %f %f %f %f\n", worker_id, selection_probs[worker_id], selection_probs[worker_id + 1], rand_val, *total_sum);
+            //     assert(false);
+            // }
             if (!tabu_list[worker_id]) {*total_sum = worker_id;}
         }
         __syncthreads();
         if (worker_id == 0 && (int)*total_sum == -1) {
             // shouldn't happen
-            for (int city=0; city < num_cities; ++city) { if (!tabu_list[city]) { selected_city = city; break; }}
+            for (int city=0; city < num_cities; ++city) { if (!tabu_list[city]) { *total_sum = city; break; }}
         }
         __syncthreads();
         selected_city = (int)*total_sum;
@@ -165,9 +169,9 @@ TspResult solveTSPQueen(
 ) {
     int num_cities = tsp_input.dimension;
     int num_queens = 68;
-    int num_workers = num_cities;
+    int num_workers = 3;//num_cities;
     assert(num_cities >= num_workers);
-    assert(num_cities / num_workers <= 32);
+    assert(num_cities / num_queens <= 32);
     assert(num_cities <= 1024);
 
     int value;
